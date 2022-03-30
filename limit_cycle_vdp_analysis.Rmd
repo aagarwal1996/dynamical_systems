@@ -1,0 +1,118 @@
+
+```{r}
+library('fda')
+
+# Limit Cycle Data 
+x_df = read.csv("Yu-Group/Dynamical_Systems /x.csv")
+y_df = read.csv("Yu-Group/Dynamical_Systems /y.csv")
+fx_df = read.csv("Yu-Group/Dynamical_Systems /f_x.csv")
+fy_df = read.csv("Yu-Group/Dynamical_Systems /f_y.csv")
+
+
+x =  sapply(x_df[, c(1)], as.numeric)
+y =  sapply(y_df[, c(1)], as.numeric)
+
+f_x =  sapply(fx_df[, c(1)], as.numeric)
+f_y =  sapply(fy_df[, c(1)], as.numeric)
+
+```
+
+
+```{r}
+
+
+# Create a basis object, for x
+
+xbasis = create.bspline.basis(range=c(-3,3),norder=4,nbasis=12)
+
+# and for y
+
+ybasis = create.bspline.basis(range=c(-10,10),norder=4,nbasis=12)
+
+# Now evaluate the basis
+
+xbvals = eval.basis(x,xbasis)
+ybvals = eval.basis(y,ybasis)
+
+# What we need is the evaluation of phi_j(x_i)*psi_k(x_i) for
+# each x and y. This creates 144 rows. I'll produce this using
+# kronecker products
+
+Xmat = (xbvals%x%matrix(1,1,12)) * (matrix(1,1,12)%x%ybvals)
+
+# Here the columns of xbvals are repeated 12 times in sequence
+# while each column of ybvals is repeated 12 times togehter.
+
+# Now we need a penalty matrix. We can get the penalty for one
+# basis from
+
+xPen = eval.penalty(xbasis,2)
+yPen = eval.penalty(ybasis,2)
+
+# to create the combined penalty we take the same kronecker
+# product form
+
+allPen = xPen%x%diag(12) + diag(12)%x%yPen
+
+# (note that this penalizes the sum of squared second derivative,
+# without the cross term that would go into a thin plate spline
+# penalty)
+
+# And we can put it all together as
+
+lambda = 1e-8
+coefs_1 =  solve( t(Xmat)%*%Xmat  + lambda*allPen, t(Xmat)%*%f_x)  
+coefs_2 =  solve( t(Xmat)%*%Xmat  + lambda*allPen, t(Xmat)%*%f_y)
+
+# We'll reshape the coefficients into a matrix and put it in
+# a bivariate functional data object
+
+sfd_1 = bifd(t(matrix(coefs_1,12,12)), xbasis,ybasis)
+sfd_2 = bifd(t(matrix(coefs_2,12,12)), xbasis,ybasis)
+# and evaluate
+
+xpts = seq(-3,3,len=41)
+ypts = seq(-10,10,len=51)
+
+smat1 = eval.bifd(xpts,ypts,sfd_1)
+smat2 = eval.bifd(xpts,ypts,sfd_2)
+
+contour(xpts,ypts,smat1)
+contour(xpts,ypts,smat2)
+
+
+eta = 0.1
+plot(x,y,type='l',xlim=c(-3,3),ylim=c(-10,10))
+for(i in seq(1,41,by=5)){
+  for(j in seq(1,51,by=5)){
+    arrows(xpts[i],ypts[j],xpts[i]+eta*smat1[i,j],ypts[j]+ eta*smat2[i,j])
+  }
+}
+
+
+sVdP = function(t,x,p,sfd_1,sfd_2){
+  dx = eval.bifd(x[1],x[2],sfd_1)
+  dy = eval.bifd(x[1],x[2],sfd_2)
+  
+  return(list(as.vector(c(dx,dy))))
+  
+}
+
+
+traj = lsoda(c(x[1],y[1]),seq(0,100,by=0.1),sVdP,0,sfd_1=sfd_1,sfd_2=sfd_2)
+
+
+
+#  Check how well we interpolate
+
+try1 = eval.bifd(x,y,sfd_1)
+try2 = eval.bifd(x,y,sfd_2)
+
+plot(f_x,diag(try1))
+plot(f_y,diag(try2))
+abline(c(0,1))
+
+#do bivariate local linear regression?  
+
+```
+
