@@ -3,10 +3,10 @@
 library('fda')
 
 # Limit Cycle Data 
-x_df = read.csv("Yu-Group/Dynamical_Systems /x.csv")
-y_df = read.csv("Yu-Group/Dynamical_Systems /y.csv")
-fx_df = read.csv("Yu-Group/Dynamical_Systems /f_x.csv")
-fy_df = read.csv("Yu-Group/Dynamical_Systems /f_y.csv")
+x_df = read.csv("x.csv", header = FALSE, col.names = c("x"))
+y_df = read.csv("y.csv", header = FALSE, col.names = c("y"))
+fx_df = read.csv("f_x.csv", header = FALSE, col.names = c("f_x"))
+fy_df = read.csv("f_y.csv", header = FALSE, col.names = c("f_y"))
 
 
 x =  sapply(x_df[, c(1)], as.numeric)
@@ -22,6 +22,7 @@ f_y =  sapply(fy_df[, c(1)], as.numeric)
 
 
 # Create a basis object, for x
+# 10 breaks in spline
 
 xbasis = create.bspline.basis(range=c(-3,3),norder=4,nbasis=12)
 
@@ -98,7 +99,6 @@ sVdP = function(t,x,p,sfd_1,sfd_2){
   
 }
 
-
 traj = lsoda(c(x[1],y[1]),seq(0,100,by=0.1),sVdP,0,sfd_1=sfd_1,sfd_2=sfd_2)
 
 
@@ -112,6 +112,7 @@ plot(f_x,diag(try1))
 plot(f_y,diag(try2))
 abline(c(0,1))
 
+# Q: what do we hope to see? what kernel to use?
 #do bivariate local linear regression?  
 
 ```
