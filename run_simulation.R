@@ -2,16 +2,22 @@
 ## Imports
 ##
 library(fda)
-library(ggplot2)
+library(tidyverse)
 library(deSolve)
 library(mvtnorm) # for Multivariate Normal density estimates in KDE
-source(here::here('data_generation.R')) # functions to generate data from specific DS are in another file
+library(shape) # for pretty arrows
+library(ggquiver) # for vector field plots
+library(ggpubr) # to generate side-by-side plots
 
+source(here::here('data_generation.R')) # functions to generate data from specific DS are in another file
+library(Rcpp)
+sourceCpp(here::here('nw_regression.cpp'))
+sourceCpp(here::here('loess.cpp'))
 ##
 ## Data Generation
 ##
 
-generate_data <- function(model, params, num_samples = 1000, 
+generate_limit_cycle_data <- function(model, params, num_samples = 1500, 
                           add_obs_noise = F, add_grad_nose = F,
                           use_seed = F, save_csv = F){
   # This is a wrapper for data generation under a number of DS models
@@ -33,7 +39,10 @@ generate_data <- function(model, params, num_samples = 1000,
   if (use_seed){set.seed(2022)}
   
   if (model == "van_der_pol"){
-    sampled_data <- generate_van_der_pol(params)
+    sampled_data <- generate_van_der_pol(params,num_samples=num_samples)
+  }
+  else if (model == "sinusoidal_van_der_pol"){
+    sampled_data <- generate_sinusoidal_van_der_pol(params,num_samples=num_samples)
   }
   else if(model == "unstable_spiral"){
     stop('Error: Unstable sprial not yet implemented.')
@@ -52,12 +61,49 @@ generate_data <- function(model, params, num_samples = 1000,
   return(sampled_data)
 }
 
+generate_grid_data <- function(model, params, eval_grid){
+  # This is a wrapper for data generation under a number of DS models
+  # See `data_generation.R` for individual models
+  #
+  ## Inputs:
+  # model (string): name of the model to sample from the limit cycle of
+  #   implemented: van_der_pol, abhi
+  #   to-implement: unstable_spiral, morris_lecar
+  # params (vector): vector of parameters for the specified model
+  # eval_grid (matrix): n x 2 matrix of grid points to calcualte gradient at
+  #
+  ## Outputs:
+  # grid_gradient (data.frame): sampled grid from the gradient field; columns in [x,y,f_x,f_y]
+  
+  if (model == "van_der_pol"){
+    grid_gradient <- t(apply(eval_grid, 1, van_der_pol_gradient_helper, mu = params[1]))
+  }
+  else if (model == "sinusoidal_van_der_pol"){
+    grid_gradient <- t(apply(eval_grid, 1, van_der_pol_gradient_helper, mu = params[1], sinusoid = T))
+  }
+  else if(model == "unstable_spiral"){
+    stop('Error: Unstable sprial not yet implemented.')
+  }
+  else if(model == "abhi"){
+    # true field is unknown
+    grid_gradient <- matrix(0, nrow = nrow(eval_grid), ncol = ncol(eval_grid))
+  }
+  else{
+    stop('Error: ', model, ' model not implemented.')
+  }
+  
+  return(grid_gradient)
+}
+
 ##
 ## Gradient Field Approximation
 ##
 
-evaluate_gradient_methods <- function(data, tail_n = 500, 
-                            x_grid_size = 24, y_grid_size = 24, extrapolation_size = 2){
+evaluate_gradient_methods <- function(data, tail_n = 700, 
+                            x_grid_size = 24, y_grid_size = 24, extrapolation_size = 2,
+                            nw_bandwidth = 0.1, loess_bandwidth = 0.1,
+                            method_title = "",
+                            method_str = "", method_params = NA){
   # Function which runs multiple methods to estimate the gradient field
   #   implemented: splines and kernel regression
   #   to-implement: local linear regression
@@ -83,25 +129,41 @@ evaluate_gradient_methods <- function(data, tail_n = 500,
   # grid to evaluate gradient extrapolation over
   x_grid <- seq(xmin - extrapolation_size , xmax + extrapolation_size, len = x_grid_size)
   y_grid <- seq(ymin - extrapolation_size, ymax + extrapolation_size, len = y_grid_size)
+  eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
   
+  # get truth over evaluation grid
+  true_field <- generate_grid_data(method_str, c(2),eval_grid)
+  true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
+  # Splines
   spline_result <- spline_gradient(limit_cycle.data, x_grid, y_grid)
-  NW_regression_result <- NW_regression(data,x_grid,y_grid) # takes some time to run
-   
-  plot_field(data, NW_regression_result, x_grid, y_grid, title="NW Kernel Regression")
+  spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
+  spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result_toplot, title="Spline")
   ## Uncomment line below for original plots from Abhi's .Rmd
   #generate_spline_plots(data, spline_result, x_grid, y_grid)
+
+  # convert data to matrix (no labels) for CPP
+  limit_cycle.data.matrix <- unname(as.matrix(limit_cycle.data))
+  # NW
+  nw_bw = .1
+  nw_bw_matrix <- nw_bw*diag(2) # TODO: Vary bandwidth (okay as is in no noise setting)
+  NW_regression_result <- NW_regression_cpp(eval_grid, limit_cycle.data.matrix, nw_bw_matrix)
+  nw_field_plot <- ggplot_field(limit_cycle.data, eval_grid, NW_regression_result, title="NW Kernel Regression")
+  nw_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid, NW_regression_result, nw_bw, title = paste(method_title, "lsoda Solutions Along NW Gradient Field", sep = ": "))
   
-  # TODO: change output format of splines to use `plot_field function`
-  plot(data$x,data$y,type='l',xlim=c(min(x_grid),max(x_grid)),ylim=c(min(y_grid),max(y_grid)),
-       main = "Spline Estimate", xlab = "x", ylab = "y")
-  eta <- 0.1
-  for(i in seq(1,length(x_grid), by = 2)){
-    for(j in seq(1,length(y_grid), by = 2)){
-      arrows(x_grid[i],y_grid[j],x_grid[i]+eta*spline_result$x_grad_eval[i,j],y_grid[j]+ eta*spline_result$y_grad_eval[i,j])
-    }
-  }
-  return(NW_regression_result)
+  # LOESS
+  loess_bw = .1
+  loess_fit <- eval_loess_fit(eval_grid, limit_cycle.data.matrix, loess_bw)
+  loess_field_plot <- ggplot_field(limit_cycle.data, eval_grid, loess_fit, title="LOESS")
+  loess_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid, 
+                                                  loess_fit, loess_bw, loess = T, title = paste(method_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
+  
+  # Output plots
+  field_plots <- ggarrange(true_field_plot, spline_field_plot, nw_field_plot, loess_field_plot, ncol=4, nrow=1)
+  field_plots <- annotate_figure(field_plots, top = text_grob(label = method_title))
+  print(field_plots)
+  print(nw_gradient_plot)
+  print(loess_gradient_plot)
 }
 
 ##
@@ -130,7 +192,7 @@ spline_gradient <- function(data, x_grid, y_grid){
   # each x and y. This creates 144 rows. I'll produce this using
   # Kronecker products
   Xmat = (xbasis.vals%x%matrix(1,1,12)) * (matrix(1,1,12)%x%ybasis.vals)
-  #print(dim(Xmat))
+  
   # Here the columns of xbasis.vals are repeated 12 times in sequence
   # while each column of ybasis.vals is repeated 12 times together.
   
@@ -138,12 +200,13 @@ spline_gradient <- function(data, x_grid, y_grid){
   # basis from
   xPen = eval.penalty(xbasis, 2)
   yPen = eval.penalty(ybasis, 2)
-  
+
   # to create the combined penalty we take the same Kronecker
   # product form
   
   allPen = xPen%x%diag(12) + diag(12)%x%yPen
-  
+  #View(allPen)
+ 
   # (note that this penalizes the sum of squared second derivative,
   # without the cross term that would go into a thin plate spline
   # penalty)
@@ -154,6 +217,7 @@ spline_gradient <- function(data, x_grid, y_grid){
   coefs_x =  solve( t(Xmat)%*%Xmat  + lambda*allPen, t(Xmat)%*%data$f_x)  
   coefs_y =  solve( t(Xmat)%*%Xmat  + lambda*allPen, t(Xmat)%*%data$f_y)
   
+  
   # We'll reshape the coefficients into a matrix and put it in
   # a bivariate functional data object
   sfd_x = bifd(t(matrix(coefs_x,12,12)), xbasis, ybasis)
@@ -161,6 +225,14 @@ spline_gradient <- function(data, x_grid, y_grid){
   
   smat_x = eval.bifd(x_grid,y_grid,sfd_x)
   smat_y = eval.bifd(x_grid,y_grid,sfd_y)
+  
+  # build a penalty matrix to plot...
+  #sfd_x.penalty = bifd(t(matrix(coefs_x,12,12)), xbasis, ybasis)
+  #sfd_y.penalty = bifd(t(matrix(coefs_y,12,12)), xbasis, ybasis)
+  #smat_x.penalty = eval.bifd(x_grid,y_grid,sfd_x)
+  #smat_y.penalty = eval.bifd(x_grid,y_grid,sfd_y)
+  #View(allPen)
+  #print(dim(xPen))
   
   traj = lsoda(c(data$x[1],data$y[1]),seq(0,100,by=0.1),sVdP,0,sfd_x=sfd_x,sfd_y=sfd_y)
   
@@ -180,38 +252,13 @@ sVdP = function(t,x,p,sfd_x,sfd_y){
 ## Kernel regression
 ##
 
-NW_regression <- function(data, x_grid, y_grid){
-  nw_results_array <- array(-5, c(length(x_grid),length(y_grid),2))
-
-  bw_matrix <- matrix(c(.1,0,0,0.1),2)
-  for (i in 1:length(x_grid)){
-    for (j in 1:length(y_grid)){
-      nw_results_array[i,j,] <- eval_gaussian_NW(x_grid[i], y_grid[j], data, bw_matrix)
-    }
-  }
-  return(nw_results_array)
-}
-
-eval_gaussian_NW <- function(x_val, y_val, data, bw_matrix){
-  eval_point <- c(x_val, y_val)
-  evaluation_results <- data
-  evaluation_results$kernel_distance <- apply(evaluation_results[,1:2],1,  function(x) dmvnorm(x = x, mean = eval_point, sigma = bw_matrix))
-
-  evaluation_results$numerator_x_terms <- evaluation_results$f_x * evaluation_results$kernel_distance
-  evaluation_results$numerator_y_terms <- evaluation_results$f_y * evaluation_results$kernel_distance
-  
-  gradient_estimate_x <- sum(evaluation_results$numerator_x_terms)/sum(evaluation_results$kernel_distance)
-  gradient_estimate_y <- sum(evaluation_results$numerator_y_terms)/sum(evaluation_results$kernel_distance)
-  
-  return(c(gradient_estimate_x, gradient_estimate_y))
-  
-}
+# See: `nw_regression.cpp`
 
 ##
 ## Local linear regression
 ##
 
-# TODO: Implement!
+# See: `loess.cpp`
 
 ##
 ## Plotting functions
@@ -226,21 +273,76 @@ plot_observations <- function(data){
     labs(x="x",y="y",title="Observations from a Dynamical System")
 }
 
-plot_field <- function(ls_samples, gradient_data, x_grid,y_grid,title_str=""){
+ggplot_field <- function(ls_samples, eval_grid, gradient_data,title=""){
   # plot a gradient field
-  eta = 0.1
-  plot(x_grid,y_grid,type='l',
-       xlim=c(min(x_grid)-1,max(x_grid)+1),
-       ylim=c(min(y_grid)-1,max(y_grid)+1), xlab = "", ylab = "")
-  plot(ls_samples$x, ls_samples$y,
-       xlim=c(min(x_grid)-1,max(x_grid)+1),
-       ylim=c(min(y_grid)-1,max(y_grid)+1), 
-       main = title_str, xlab = "x", ylab = "y")
-  for(i in seq(1,length(x_grid), by = 2)){
-    for(j in seq(1,length(y_grid), by = 2)){
-      arrows(x_grid[i],y_grid[j],x_grid[i]+eta*gradient_data[i,j,1],y_grid[j]+ eta*gradient_data[i,j,2])
+
+  sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
+  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
+  
+  field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
+    geom_quiver(color = "#003262") +
+    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
+    labs(title = title)
+  
+  return(field_plot)
+}
+
+plot_gradient_path <- function(ls_samples, eval_grid, gradient_data, bw, num_reps = 9, title =""){
+  
+  nw_trajectory <- generate_nw_path(ls_samples, bw, num_samples = 500)
+  trajectory_tibble <- tibble(x = nw_trajectory[,1], y = nw_trajectory[,2], u = NA, v = NA, run = 1)
+  
+  if (num_reps > 1){
+    for (i in 2:num_reps){
+      nw_trajectory <- generate_nw_path(ls_samples, bw, num_samples = 500)
+      new_trajectory_tibble <- tibble(x = nw_trajectory[,1], y = nw_trajectory[,2], u = NA, v = NA, run = i)
+      trajectory_tibble <- bind_rows(trajectory_tibble, new_trajectory_tibble)
     }
   }
+  
+  sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
+  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
+  
+  path_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
+    geom_quiver(color = "#003262") +
+    geom_path(data = trajectory_tibble, aes(x = x, y = y)) +
+    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
+    geom_point(x = as.numeric(trajectory_tibble[1,1]), y =as.numeric(trajectory_tibble[1,2]), color = "red", size = 3) +
+    labs(title = title) +
+    facet_wrap(~run)
+  
+  return(path_plot)
+  
+}
+
+plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, loess = F, num_reps = 9, title =""){
+  
+  plot_list <- list()
+  sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
+  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
+  
+
+  for (i in 1:num_reps){
+      if (loess){
+        trajectory <- generate_loess_path(ls_samples, bw, num_samples = 2000)
+      }
+      else{
+        trajectory <- generate_nw_path(ls_samples, bw, num_samples = 2000)
+      }
+      trajectory_tibble <- tibble(x = trajectory[,1], y = trajectory[,2], u = NA, v = NA, run = i)
+      path_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
+        geom_quiver(color = "#003262") +
+        geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
+        geom_path(data = trajectory_tibble, aes(x = x, y = y)) +
+        geom_point(x = as.numeric(trajectory_tibble[1,1]), y =as.numeric(trajectory_tibble[1,2]), color = "red", size = 3) +
+        facet_wrap(~run)
+      plot_list <- append(plot_list, list(path_plot))
+  }
+  
+  path_plots <- ggarrange(plotlist = plot_list, nrow = ceiling(length(plot_list)/3), ncol = 3)
+  path_plots <- annotate_figure(path_plots, top = text_grob(label = title))
+  return(path_plots)
+  
 }
 
 generate_spline_plots <- function(data, spline_output, x_grid, y_grid){
@@ -269,6 +371,14 @@ generate_spline_plots <- function(data, spline_output, x_grid, y_grid){
 ## Evaluation
 ##
 
-abhi_data <- generate_data("abhi", c())
-saved_abhi_NW <- evaluate_gradient_methods(abhi_data, extrapolation_size = 2)
+#abhi_data <- generate_limit_cycle_data("abhi", c())
+#evaluate_gradient_methods(abhi_data, extrapolation_size = 2, method_str = "Abhi", method_params = c())
 
+vp_data <- generate_limit_cycle_data("van_der_pol", c(20))
+evaluate_gradient_methods(vp_data, extrapolation_size = 2, method_title = "Van der Pol; mu = 20", method_str = "van_der_pol", method_params = c(20))
+ 
+vp_data <- generate_limit_cycle_data("van_der_pol", c(.5))
+evaluate_gradient_methods(vp_data, extrapolation_size = 2, method_title = "Van der Pol; mu = 0.5",method_str = "van_der_pol", method_params = c(0.5))
+
+# svp_data <- generate_limit_cycle_data("sinusoidal_van_der_pol", c(2.05))
+# evaluate_gradient_methods(svp_data, extrapolation_size = 2)
