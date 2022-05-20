@@ -13,39 +13,45 @@ source(here::here('data_generation.R')) # functions to generate data from specif
 library(Rcpp)
 sourceCpp(here::here('nw_regression.cpp'))
 sourceCpp(here::here('loess.cpp'))
+
 ##
 ## Data Generation
 ##
 
-generate_limit_cycle_data <- function(model, params, num_samples = 1500, 
-                          add_obs_noise = F, add_grad_nose = F,
+#' This is a wrapper for data generation under a number of DS models
+#' See `data_generation.R` for individual models
+#'
+#' @param model (string): name of the model to sample from the limit cycle of
+#'     implemented: "van_der_pol", "abhi"   
+#'     to-implement: asymmetrically sampled unit circle, others... 
+#' @param params (vector): vector of parameters for the specified model
+#'     Will vary my model, see `data_generation.R` for specific cases
+#' @param num_samples (integer)[optional] Number of samples to generate, 
+#'     starting from some initial condition
+#' @param sample_density (numeric)[optional] Delta t time-step used in `lsoda`
+#' @param add_obs_noise (logical)[optional]: whether to add random noise to each observation
+#'     TODO: implement, will involve additional parameters
+#' @param use_seed (logical)[optional]: whether to set a seed before drawing data
+#' @param save_csv (logical)[optional]: whether to save the CSV of the data
+#'
+#' @return sampled_data (data.frame): `num_samples` sampled points from the limit cycle
+#'     columns in c(x,y,f_x,f_y)
+#'
+#' @examples
+#' generate_limit_cycle_data("van_der_pol", c(.5)) # non-stiff VdP
+#' generate_limit_cycle_data("abhi", c()) # Abhi's .csv data with no params
+generate_limit_cycle_data <- function(model, params, 
+                          num_samples = 1500, sample_density = 0.1,
+                          add_obs_noise = F,
                           use_seed = F, save_csv = F){
-  # This is a wrapper for data generation under a number of DS models
-  # See `data_generation.R` for individual models
-  #
-  ## Inputs:
-  # model (string): name of the model to sample from the limit cycle of
-  #   implemented: van_der_pol, abhi
-  #   to-implement: unstable_spiral, morris_lecar
-  # params (vector): vector of parameters for the specified model
-  # add_obs_noise (logical)[optional]: whether to add random noise to each observation (x,y); TODO: implement
-  # add_grad_nose (logical)[optional]: whether to add random noise to each gradient (f_x, f_y); TODO: implement
-  # use_seed (logical)[optional]: whether to set a seed before drawing data
-  # save_csv (logical)[optional]: whether to save the CSV of the data; TODO: implement
-  #
-  ## Outputs:
-  # sampled_data (data.frame): `num_samples` sampled points from the limit cycle; columns in [x,y,f_x,f_y]
-  
+
   if (use_seed){set.seed(2022)}
   
   if (model == "van_der_pol"){
-    sampled_data <- generate_van_der_pol(params,num_samples=num_samples)
+    sampled_data <- generate_van_der_pol(params,num_samples=num_samples,sample_density=sample_density)
   }
-  else if (model == "sinusoidal_van_der_pol"){
-    sampled_data <- generate_sinusoidal_van_der_pol(params,num_samples=num_samples)
-  }
-  else if(model == "unstable_spiral"){
-    stop('Error: Unstable sprial not yet implemented.')
+  else if (model == "asymmetric_circle"){
+    sampled_data <- generate_asymmetric_circle(params,num_samples=num_samples,sample_density=sample_density)
   }
   else if(model == "abhi"){
     sampled_data <- get_abhi_data()
@@ -55,7 +61,8 @@ generate_limit_cycle_data <- function(model, params, num_samples = 1500,
   }
   
   if (save_csv){
-    # TODO: Implement
+    file_name <- paste0("Saved_Data/",model,"-",format(Sys.time(), "%m_%d_%Y-%H_%M_%S"),".csv")
+    write_csv(sampled_data, file_name)
   }
   
   return(sampled_data)
@@ -371,14 +378,14 @@ generate_spline_plots <- function(data, spline_output, x_grid, y_grid){
 ## Evaluation
 ##
 
+# Abhi's original VdP Data
 #abhi_data <- generate_limit_cycle_data("abhi", c())
-#evaluate_gradient_methods(abhi_data, extrapolation_size = 2, method_str = "Abhi", method_params = c())
+#evaluate_gradient_methods(abhi_data, extrapolation_size = 1, method_str = "Abhi", method_params = c())
 
-vp_data <- generate_limit_cycle_data("van_der_pol", c(20))
-evaluate_gradient_methods(vp_data, extrapolation_size = 2, method_title = "Van der Pol; mu = 20", method_str = "van_der_pol", method_params = c(20))
+# High stiffness VdP
+#vp_data <- generate_limit_cycle_data("van_der_pol", c(20), use_seed = T, save_csv = T, num_samples = 15000, sample_density = 0.01)
+#evaluate_gradient_methods(vp_data, extrapolation_size = 1, method_title = "Van der Pol; mu = 20", method_str = "van_der_pol", method_params = c(20))
  
-vp_data <- generate_limit_cycle_data("van_der_pol", c(.5))
-evaluate_gradient_methods(vp_data, extrapolation_size = 2, method_title = "Van der Pol; mu = 0.5",method_str = "van_der_pol", method_params = c(0.5))
-
-# svp_data <- generate_limit_cycle_data("sinusoidal_van_der_pol", c(2.05))
-# evaluate_gradient_methods(svp_data, extrapolation_size = 2)
+# Low sitffness VdP
+#vp_data <- generate_limit_cycle_data("van_der_pol", c(.5))
+#evaluate_gradient_methods(vp_data, extrapolation_size = 1, method_title = "Van der Pol; mu = 0.5",method_str = "van_der_pol", method_params = c(0.5))
