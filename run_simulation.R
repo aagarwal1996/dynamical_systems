@@ -1,6 +1,7 @@
-##
-## Imports
-##
+#############
+## Imports ##
+#############
+
 library(fda)
 library(deSolve)
 library(tidyverse)
@@ -15,9 +16,10 @@ library(Rcpp)
 sourceCpp(here::here('Estimation_Methods/nw_regression.cpp'))
 sourceCpp(here::here('Estimation_Methods/loess.cpp'))
 sourceCpp(here::here('Estimation_Methods/bspline.cpp'))
-##
-## Data Generation
-##
+
+#####################
+## Data Generation ##
+#####################
 
 #' This is a wrapper for data generation under a number of DS models
 #' See `data_generation.R` for individual models
@@ -68,28 +70,25 @@ generate_limit_cycle_data <- function(model, params,
   return(sampled_data)
 }
 
+#' This function evaluates the gradient field over a user-specified grid
+#'
+#' @param model (string): name of the model to generate the gradient field of; see `generate_limit_cycle_data()`
+#' @param params (vector): vector of parameters for the specified model; see `generate_limit_cycle_data()`
+#' @param eval_grid (matrix): n x 2 matrix of grid points to calculate gradient at
+#'
+#' @return grid_gradient (matrix): n x 2 matrix of gradient evaluated at `eval_grid`
+#'
+#' @examples
+#' x_grid <- seq(-1, 1, len = x_grid_size)
+#' y_grid <- seq(-1, 1, len = y_grid_size)
+#' eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid))) # convert to N x 2 matrix
+#' true_field <- generate_grid_data("van_der_pol", c(2), eval_grid)
 generate_grid_data <- function(model, params, eval_grid){
-  # This is a wrapper for data generation under a number of DS models
-  # See `data_generation.R` for individual models
-  #
-  ## Inputs:
-  # model (string): name of the model to sample from the limit cycle of
-  #   implemented: van_der_pol, abhi
-  #   to-implement: unstable_spiral, morris_lecar
-  # params (vector): vector of parameters for the specified model
-  # eval_grid (matrix): n x 2 matrix of grid points to calcualte gradient at
-  #
-  ## Outputs:
-  # grid_gradient (data.frame): sampled grid from the gradient field; columns in [x,y,f_x,f_y]
-  
   if (model == "van_der_pol"){
     grid_gradient <- t(apply(eval_grid, 1, van_der_pol_gradient_helper, mu = params[1]))
   }
-  else if (model == "sinusoidal_van_der_pol"){
-    grid_gradient <- t(apply(eval_grid, 1, van_der_pol_gradient_helper, mu = params[1], sinusoid = T))
-  }
-  else if(model == "unstable_spiral"){
-    stop('Error: Unstable sprial not yet implemented.')
+  else if(model == "asymmetric_circle"){
+    stop('Error: Asymmetric circle gradient grid not yet implemented.')
   }
   else if(model == "abhi"){
     # true field is unknown
@@ -102,29 +101,35 @@ generate_grid_data <- function(model, params, eval_grid){
   return(grid_gradient)
 }
 
-##
-## Gradient Field Approximation
-##
+##################################
+## Gradient Field Approximation ##
+##################################
 
-evaluate_gradient_methods <- function(data, tail_n = 700, 
-                            x_grid_size = 24, y_grid_size = 24, extrapolation_size = 2,
+#' This function estimates the gradient field over a grid given limit cycle data
+#' 4 different estimators are compared: NW KDE, LOESS, kNN, and bSplines
+#' The output is a series of plots allowing direct comparison between methods
+#'
+#' @param data (data.frame): sequential solution trajectory data with columns in [x, y, f_x, f_y]
+#' @param model_str (string): name of the model to generate the gradient field of; see `generate_limit_cycle_data()`
+#'     This is used to generate the true gradient field
+#' @param model_params (vector): vector of parameters for the specified model
+#' @param tail_n (integer)[optional]: only the last `tail_n` samples are considered as the limit cycle
+#' @param x_grid_size (integer)[optional]: number of x-axis samples in extrapolation grid
+#' @param y_grid_size integer)[optional]: number of y-axis samples in extrapolation grid
+#' @param extrapolation_size (numeric)[optional]: axis limits will be the extreme observations +/- this parameter
+#' @param nw_bandwidth (numeric)[optional]: Scalar bandwidth to use in NW kernel regression
+#' @param loess_bandwidth (numeric)[optional]: Scalar bandwidth to use in LOESS
+#' @param model_title (string)[optional]: Name of ODE model to put on plots e.g. "Stiff VdP"
+#'
+#' @return
+#'
+#' @examples
+#' evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(0.5),
+#'  extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5")
+evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 700, 
+                            x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5,
                             nw_bandwidth = 0.1, loess_bandwidth = 0.1,
-                            model_title = "",
-                            model_str = "", method_params = NA){
-  # Function which runs multiple methods to estimate the gradient field
-  #   implemented: splines and kernel regression
-  #   to-implement: local linear regression
-  #
-  ## Inputs:
-  # data (data.frame): contains data with columns in [x, y, f_x, f_y]
-  # tail_n (integer)[optional]: we only use the last `tail_n` samples of the data, ideally from the limit cycle
-  # x_grid_size (integer)[optional]: size of x-axis grid to extrapolate over
-  # y_grid_size (integer)[optional]: size of y-axis grid to extrapolate over
-  # extrapolation_size (numeric)[optional]: grid will be from max and min of observations +/- this variable
-  #
-  # Outputs:
-  # None (Displays various plots)
-
+                            model_title = ""){
   limit_cycle.data <- tail(data, n = tail_n)
   
   # get extreme points of the data
@@ -142,7 +147,7 @@ evaluate_gradient_methods <- function(data, tail_n = 700,
   true_field <- generate_grid_data(model_str, c(2),eval_grid)
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
-  # Splines
+  # bSplines
   spline_result <- spline_gradient(limit_cycle.data, x_grid, y_grid)
   spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
   spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result_toplot, title="Spline")
@@ -166,6 +171,7 @@ evaluate_gradient_methods <- function(data, tail_n = 700,
                                                   loess_fit, loess_bw, loess = T, title = paste(model_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
   
   # Output plots
+  # TODO: Figure out why spline field but won't plot
   field_plots <- ggarrange(true_field_plot, nw_field_plot, loess_field_plot, ncol=3, nrow=1) # spline_field_plot
   field_plots <- annotate_figure(field_plots, top = text_grob(label = model_title))
   print(field_plots)
@@ -173,27 +179,27 @@ evaluate_gradient_methods <- function(data, tail_n = 700,
   print(loess_gradient_plot)
 }
 
-##
-## Spline fitting
-##
+####################
+## Spline fitting ##
+####################
 
 # See: `bspline.R` and `bspline.cpp`
 
-##
-## Kernel regression
-##
+#######################
+## Kernel regression ##
+#######################
 
 # See: `nw_regression.cpp`
 
-##
-## Local linear regression
-##
+#############################
+## Local linear regression ##
+#############################
 
 # See: `loess.cpp`
 
-##
-## Plotting functions
-##
+########################
+## Plotting functions ##
+########################
 
 # TODO: Add better documentation and move to separate file
 
@@ -204,9 +210,8 @@ plot_observations <- function(data){
     labs(x="x",y="y",title="Observations from a Dynamical System")
 }
 
-ggplot_field <- function(ls_samples, eval_grid, gradient_data,title=""){
-  # plot a gradient field
-
+ggplot_field <- function(ls_samples, eval_grid, gradient_data, title=""){
+  # plot a gradient field with limit cycle samples overlayed
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
   gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
   
@@ -219,7 +224,8 @@ ggplot_field <- function(ls_samples, eval_grid, gradient_data,title=""){
 }
 
 plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, loess = F, num_reps = 9, title =""){
-  
+  # generate random solution paths using the NW or LOESS estimated gradient field
+  # TODO: add splines and KNN
   plot_list <- list()
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
   gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
@@ -249,18 +255,23 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, l
 }
 
 
-##
-## Evaluation
-##
+################
+## Evaluation ##
+################
+
+# Two step procedure:
+# 1) Generate limit cycle data
+# 2) Estimate gradient fields and generate comparsion plots
+# TODO: Find true gradient field in step 1 instead of 2
 
 abhi_data <- generate_limit_cycle_data("abhi", c())
-evaluate_gradient_methods(abhi_data, extrapolation_size = 1, model_title = "Abhi's Van der Pol", model_str = "abhi", method_params = c())
+evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
 
 #vp_data <- generate_limit_cycle_data("van_der_pol", c(20))
-#evaluate_gradient_methods(vp_data, extrapolation_size = 1, model_title = "Van der Pol; mu = 20", model_str = "van_der_pol", method_params = c(20))
+#evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
  
 #vp_data <- generate_limit_cycle_data("van_der_pol", c(.5))
-#evaluate_gradient_methods(vp_data, extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5",model_str = "van_der_pol", method_params = c(0.5))
+#evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(0.5), extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5")
 
 # svp_data <- generate_limit_cycle_data("sinusoidal_van_der_pol", c(2.05))
 # evaluate_gradient_methods(svp_data, extrapolation_size = 1)
