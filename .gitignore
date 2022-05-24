@@ -2,5 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-Saved_Data/
+Saved_Data/*
+!Saved_Data/Abhi
 Result_Images/
