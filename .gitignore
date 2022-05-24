@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 Result_Images/
+Saved_Data/*
+!Saved_Data/Abhi/
