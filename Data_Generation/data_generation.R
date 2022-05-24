@@ -39,6 +39,7 @@ generate_van_der_pol <- function(params, num_samples = 1500, sample_density = 0.
   ## Inputs:
   # params (numeric): mu parameter for Van der pol system
   # num_samples (integer)[optional]: number of samples to generate
+  # sample_density (numeric)[optional]: `lsoda` Delta t between samples
   #
   ## Outputs:
   # sampled_data (data.frame): num_samples samples; columns in [x,y]
@@ -111,7 +112,11 @@ nw_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
+<<<<<<< HEAD:Data_Generation/data_generation.R
 generate_nw_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
+=======
+generate_nw_path <- function(data, bw, num_samples = 5000, sample_density = 0.1){
+>>>>>>> 0efc736321706cbc4222af4f8abf018f148f8201:data_generation.R
   # function which generates a random trajectory along the gradient field
   # of a NW kernel regression fit. The IC is randomized
   # 
@@ -145,7 +150,11 @@ loess_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
+<<<<<<< HEAD:Data_Generation/data_generation.R
 generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
+=======
+generate_loess_path <- function(data, bw, num_samples = 5000, sample_density = 0.1){
+>>>>>>> 0efc736321706cbc4222af4f8abf018f148f8201:data_generation.R
   # function which generates a random trajectory along the gradient field
   # of the LOESS Solution. The IC is randomized
   # 
