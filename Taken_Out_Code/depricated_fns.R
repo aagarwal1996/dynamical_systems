@@ -49,3 +49,31 @@ plot_field <- function(ls_samples, eval_grid, gradient_data,title_str=""){
     }
   }
 }
+
+plot_gradient_path_single <- function(ls_samples, eval_grid, gradient_data, bw, num_reps = 9, title =""){
+  # plots NW estimated trajectories
+  nw_trajectory <- generate_nw_path(ls_samples, bw, num_samples = 500)
+  trajectory_tibble <- tibble(x = nw_trajectory[,1], y = nw_trajectory[,2], u = NA, v = NA, run = 1)
+  
+  if (num_reps > 1){
+    for (i in 2:num_reps){
+      nw_trajectory <- generate_nw_path(ls_samples, bw, num_samples = 500)
+      new_trajectory_tibble <- tibble(x = nw_trajectory[,1], y = nw_trajectory[,2], u = NA, v = NA, run = i)
+      trajectory_tibble <- bind_rows(trajectory_tibble, new_trajectory_tibble)
+    }
+  }
+  
+  sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
+  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
+  
+  path_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
+    geom_quiver(color = "#003262") +
+    geom_path(data = trajectory_tibble, aes(x = x, y = y)) +
+    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
+    geom_point(x = as.numeric(trajectory_tibble[1,1]), y =as.numeric(trajectory_tibble[1,2]), color = "red", size = 3) +
+    labs(title = title) +
+    facet_wrap(~run)
+  
+  return(path_plot)
+  
+}
