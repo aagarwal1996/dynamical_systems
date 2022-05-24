@@ -112,7 +112,7 @@ nw_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
-generate_nw_path <- function(data, bw, num_samples = 5000, sample_density = 0.1){
+generate_nw_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
   # function which generates a random trajectory along the gradient field
   # of a NW kernel regression fit. The IC is randomized
   # 
@@ -146,7 +146,7 @@ loess_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
-generate_loess_path <- function(data, bw, num_samples = 5000, sample_density = 0.1){
+generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
   # function which generates a random trajectory along the gradient field
   # of the LOESS Solution. The IC is randomized
   # 
