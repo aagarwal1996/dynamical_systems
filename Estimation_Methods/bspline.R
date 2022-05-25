@@ -25,19 +25,34 @@ calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nb
   # evaluate b-spline basis functions at coordinates in data (N x 2 matrix)
   bspline_basis_fns <- generate_bspline_basis(data, x_grid, y_grid, norder = 4, nbasis = 12)
   
-  bspline_fit <- fit_bsplines_cpp(bspline_basis_fns$xbasis.eval, bspline_basis_fns$ybasis.eval,
+  bspline_fit_coeffs <- fit_bsplines_cpp(bspline_basis_fns$xbasis.eval, bspline_basis_fns$ybasis.eval,
                                   bspline_basis_fns$xpenalty, bspline_basis_fns$ypenalty,
                                   data$f_x, data$f_y)
   
-  #output_list <- list(x_grad_bifd = sfd_x, x_grad_eval = smat_x, y_grad_bifd = sfd_y, y_grad_eval = smat_y, 
-  #                    trajectory = traj, second.deriv_penalty = allPen)
-  #return(output_list)
-  return(bspline_fit)
+  # create bivariate functional data objects for our fit splines 
+  spline.fd_x <- bifd(t(matrix(bspline_fit_coeffs[,1],12,12)), 
+                      bspline_basis_fns$xbasis,  bspline_basis_fns$ybasis)
+  spline.fd_y <- bifd(t(matrix(bspline_fit_coeffs[,2],12,12)),
+                      bspline_basis_fns$ xbasis,  bspline_basis_fns$ybasis)
+  
+  # evaluate over user-specified grid
+  spline_grid_x <- eval.bifd(x_grid,y_grid,spline.fd_x)
+  spline_grid_y <- eval.bifd(x_grid,y_grid,spline.fd_y)
+  
+  # return as |Grid| x 2 matrix
+  spline_field <- matrix(c(c(spline_grid_x),c(spline_grid_y)),ncol=2)
+
+  return(spline_field)
 }
   
-calculate_spline_gradient_field(abhi_data, x_grid, y_grid)
 
-# spline_gradient(abhi_data, x_grid, y_grid)
+bifd_spline_gradient <- function(t,x,p,sfd_x,sfd_y){
+  # Helper function for `lsoda` which evaluates derivatives of a spline fit
+  dx = eval.bifd(x[1],x[2],sfd_x)
+  dy = eval.bifd(x[1],x[2],sfd_y)
+  return(list(as.vector(c(dx,dy))))
+}
+
 ####### Old Code
   
 spline_gradient <- function(data, x_grid, y_grid){
@@ -110,14 +125,6 @@ spline_gradient <- function(data, x_grid, y_grid){
   output_list <- list(x_grad_bifd = sfd_x, x_grad_eval = smat_x, y_grad_bifd = sfd_y, y_grad_eval = smat_y, 
                       trajectory = traj, second.deriv_penalty = allPen)
   return(coefs_y)
-}
-
-
-sVdP = function(t,x,p,sfd_x,sfd_y){
-  # Helper function for `lsoda` which evaluates derivatives of a spline fit
-  dx = eval.bifd(x[1],x[2],sfd_x)
-  dy = eval.bifd(x[1],x[2],sfd_y)
-  return(list(as.vector(c(dx,dy))))
 }
 
 generate_spline_plots <- function(data, spline_output, x_grid, y_grid){

@@ -147,11 +147,8 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
   # b-splines
-  spline_result <- spline_gradient(limit_cycle.data, x_grid, y_grid)
-  spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
-  spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result_toplot, title="Spline")
-  ## Uncomment line below for original plots from Abhi's .Rmd
-  #generate_spline_plots(data, spline_result, x_grid, y_grid)
+  spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid)
+  spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result, title="Spline")
 
   # convert data to matrix (no labels) for CPP
   limit_cycle.data.matrix <- unname(as.matrix(limit_cycle.data))
@@ -169,9 +166,12 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   loess_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid, 
                                                   loess_fit, loess_bw, loess = T, title = paste(model_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
   
+  # kNN
+  # TODO: Implement
+  
   # Output plots
-  # TODO: Figure out why spline field but won't plot
-  field_plots <- ggarrange(true_field_plot, nw_field_plot, loess_field_plot, ncol=3, nrow=1) # spline_field_plot
+  # TODO: Add spline solution path plot
+  field_plots <- ggarrange(true_field_plot, spline_field_plot, nw_field_plot, loess_field_plot, ncol=4, nrow=1)
   field_plots <- annotate_figure(field_plots, top = text_grob(label = model_title))
   print(field_plots)
   print(nw_gradient_plot)
@@ -263,36 +263,11 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, l
 # 2) Estimate gradient fields and generate comparsion plots
 # TODO: Find true gradient field in step 1 instead of 2
 
-abhi_data <- generate_limit_cycle_data("abhi", c())
-evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
+#abhi_data <- generate_limit_cycle_data("abhi", c())
+#evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
 
-
-# test functions for spline CPP conversion
-limit_cycle.data <- tail(abhi_data, n = 700)
-
-# get extreme points of the data
-xmin <- floor(min(limit_cycle.data$x))
-xmax <- ceiling(max(limit_cycle.data$x))
-ymin <- floor(min(limit_cycle.data$y))
-ymax <- ceiling(max(limit_cycle.data$y))
-
-# grid to evaluate gradient extrapolation over
-x_grid <- seq(xmin - 1 , xmax + 1, len = 25)
-y_grid <- seq(ymin - 1, ymax + 1, len = 25)
-eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
-
-
-spline_result <- spline_gradient(abhi_data, x_grid, y_grid)
-spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
-ggplot_field(abhi_data, eval_grid, spline_result_toplot, title="Spline")
-generate_spline_plots(abhi_data, spline_result, x_grid, y_grid) # Abhi's original plots
-
-fda_results_list <- generate_bspline_basis(abhi_data, x_grid, y_grid)
-#vp_data <- generate_limit_cycle_data("van_der_pol", c(20))
-#evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
+#vp_data.stiff <- generate_limit_cycle_data("van_der_pol", c(20))
+#evaluate_gradient_methods(vp_data.stiff, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
  
-#vp_data <- generate_limit_cycle_data("van_der_pol", c(.5))
-#evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(0.5), extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5")
-
-# svp_data <- generate_limit_cycle_data("sinusoidal_van_der_pol", c(2.05))
-# evaluate_gradient_methods(svp_data, extrapolation_size = 1)
+#vp_data.nonstiff <- generate_limit_cycle_data("van_der_pol", c(.5))
+#evaluate_gradient_methods(vp_data.nonstiff, model_str = "van_der_pol", model_params = c(0.5), extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5")
