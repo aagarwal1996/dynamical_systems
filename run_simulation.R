@@ -153,9 +153,8 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   # b-splines (mix of R and C++)
   spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid)
   spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result, title="Spline")
-  spline_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid,
-                                               "nw", NW_regression_result, nw_bandwidth,
-                                               title = paste(model_title, "lsoda Solutions Along NW Gradient Field", sep = ": "))
+  # TODO: Implement
+  
   # NW
   nw_bw_matrix <- nw_bandwidth*diag(2) # TODO: Vary bandwidth (okay as is in no noise setting)
   NW_regression_result <- NW_regression_cpp(eval_grid, limit_cycle.data.matrix, nw_bw_matrix)
