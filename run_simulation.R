@@ -15,7 +15,6 @@ source(here::here('Estimation_Methods/bspline.R'))
 library(Rcpp)
 sourceCpp(here::here('Estimation_Methods/nw_regression.cpp'))
 sourceCpp(here::here('Estimation_Methods/loess.cpp'))
-sourceCpp(here::here('Estimation_Methods/bspline.cpp'))
 
 #####################
 ## Data Generation ##
@@ -147,7 +146,7 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   true_field <- generate_grid_data(model_str, c(2),eval_grid)
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
-  # bSplines
+  # b-splines
   spline_result <- spline_gradient(limit_cycle.data, x_grid, y_grid)
   spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
   spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result_toplot, title="Spline")
@@ -267,6 +266,28 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, l
 abhi_data <- generate_limit_cycle_data("abhi", c())
 evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
 
+
+# test functions for spline CPP conversion
+limit_cycle.data <- tail(abhi_data, n = 700)
+
+# get extreme points of the data
+xmin <- floor(min(limit_cycle.data$x))
+xmax <- ceiling(max(limit_cycle.data$x))
+ymin <- floor(min(limit_cycle.data$y))
+ymax <- ceiling(max(limit_cycle.data$y))
+
+# grid to evaluate gradient extrapolation over
+x_grid <- seq(xmin - 1 , xmax + 1, len = 25)
+y_grid <- seq(ymin - 1, ymax + 1, len = 25)
+eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
+
+
+spline_result <- spline_gradient(abhi_data, x_grid, y_grid)
+spline_result_toplot <- matrix(c(c(spline_result$x_grad_eval),c(spline_result$y_grad_eval)),ncol=2)
+ggplot_field(abhi_data, eval_grid, spline_result_toplot, title="Spline")
+generate_spline_plots(abhi_data, spline_result, x_grid, y_grid) # Abhi's original plots
+
+fda_results_list <- generate_bspline_basis(abhi_data, x_grid, y_grid)
 #vp_data <- generate_limit_cycle_data("van_der_pol", c(20))
 #evaluate_gradient_methods(vp_data, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
  

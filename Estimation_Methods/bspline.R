@@ -1,19 +1,43 @@
 library(fda)
 library(deSolve)
+library(Rcpp)
+sourceCpp(here::here('Estimation_Methods/bspline.cpp'))
 
-generate_bspline_basis <- function(data, x_grid, y_grid, norder = 4, nbasis = 12){
-  xbasis = create.bspline.basis(range=c(min(x_grid),max(x_grid)),norder=norder,nbasis=nbasis)
-  ybasis = create.bspline.basis(range=c(min(y_grid),max(y_grid)),norder=norder,nbasis=nbasis)
+generate_bspline_basis <- function(data, x_grid, y_grid, norder = 4, nbasis = 12,
+                                   penalty_order = 2){
+  # number of breaks equals `nbasis` - `norder` + 2; 10 for default parameters (8 interior knots)
+  xbasis = create.bspline.basis(rangeval=c(min(x_grid),max(x_grid)),norder=norder,nbasis=nbasis)
+  ybasis = create.bspline.basis(rangeval=c(min(y_grid),max(y_grid)),norder=norder,nbasis=nbasis)
   xbasis.vals = eval.basis(data$x,xbasis)
   ybasis.vals = eval.basis(data$y,ybasis)
   
+  # get roughness penalty for each axis
+  xPen = eval.penalty(xbasis, penalty_order)
+  yPen = eval.penalty(ybasis, penalty_order)
+  
   spline_fit_list <- list(xbasis = xbasis, ybasis = ybasis, 
-                          xbasis.eval = xbasis.vals, ybasis.eval = ybasis.vals)
+                          xbasis.eval = xbasis.vals, ybasis.eval = ybasis.vals,
+                          xpenalty = xPen, ypenalty = yPen)
   return(spline_fit_list)
 }
   
+calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nbasis = 12){
+  # evaluate b-spline basis functions at coordinates in data (N x 2 matrix)
+  bspline_basis_fns <- generate_bspline_basis(data, x_grid, y_grid, norder = 4, nbasis = 12)
   
+  bspline_fit <- fit_bsplines_cpp(bspline_basis_fns$xbasis.eval, bspline_basis_fns$ybasis.eval,
+                                  bspline_basis_fns$xpenalty, bspline_basis_fns$ypenalty,
+                                  data$f_x, data$f_y)
   
+  #output_list <- list(x_grad_bifd = sfd_x, x_grad_eval = smat_x, y_grad_bifd = sfd_y, y_grad_eval = smat_y, 
+  #                    trajectory = traj, second.deriv_penalty = allPen)
+  #return(output_list)
+  return(bspline_fit)
+}
+  
+calculate_spline_gradient_field(abhi_data, x_grid, y_grid)
+
+# spline_gradient(abhi_data, x_grid, y_grid)
 ####### Old Code
   
 spline_gradient <- function(data, x_grid, y_grid){
@@ -85,7 +109,7 @@ spline_gradient <- function(data, x_grid, y_grid){
   
   output_list <- list(x_grad_bifd = sfd_x, x_grad_eval = smat_x, y_grad_bifd = sfd_y, y_grad_eval = smat_y, 
                       trajectory = traj, second.deriv_penalty = allPen)
-  return(output_list)
+  return(coefs_y)
 }
 
 
