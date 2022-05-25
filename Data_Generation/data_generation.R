@@ -168,3 +168,28 @@ generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0
   return(traj[,-1])
   
 }
+
+## b-splines
+
+generate_spline_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
+  # function which generates a random trajectory along the gradient field
+  # of the LOESS Solution. The IC is randomized
+  # 
+  ## Inputs:
+  # data (matrix): matrix of limit cycle data to regress on; columns (x,y,f_x,f_y)
+  # bw (double): parameter which controls Kernel bandwidth (isotropic Normal variance)
+  # num_samples (integer)[optional]: number of samples to generate
+  #
+  ## Outputs:
+  # sampled_path (data.frame): num_samples samples; columns in [x,y]
+  
+  # the only parameter for this model is mu
+  # randomly pick the IC in [-10, 10] x [-10, 10]
+  initial_condition <- runif(2, min = -6, max = 6)
+  names(initial_condition) <- c('x','y')
+  bw_matrix <- bw*diag(2)
+  # compute the prediction and its gradient at each sample
+  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),nw_path_helper,list(data,bw_matrix)))
+  return(traj[,-1])
+  
+}

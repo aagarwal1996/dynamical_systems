@@ -130,6 +130,8 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
                             nw_bandwidth = 0.1, loess_bandwidth = 0.1,
                             model_title = ""){
   limit_cycle.data <- tail(data, n = tail_n)
+  # convert data to matrix (no labels) for C++ implementations
+  limit_cycle.data.matrix <- unname(as.matrix(limit_cycle.data))
   
   # get extreme points of the data
   xmin <- floor(min(limit_cycle.data$x))
@@ -142,29 +144,32 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   y_grid <- seq(ymin - extrapolation_size, ymax + extrapolation_size, len = y_grid_size)
   eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
   
+  # Generate plots
+  
   # get truth over evaluation grid
   true_field <- generate_grid_data(model_str, c(2),eval_grid)
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
-  # b-splines
+  # b-splines (mix of R and C++)
   spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid)
   spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result, title="Spline")
-
-  # convert data to matrix (no labels) for CPP
-  limit_cycle.data.matrix <- unname(as.matrix(limit_cycle.data))
+  spline_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid,
+                                               "nw", NW_regression_result, nw_bandwidth,
+                                               title = paste(model_title, "lsoda Solutions Along NW Gradient Field", sep = ": "))
   # NW
-  nw_bw = .1
-  nw_bw_matrix <- nw_bw*diag(2) # TODO: Vary bandwidth (okay as is in no noise setting)
+  nw_bw_matrix <- nw_bandwidth*diag(2) # TODO: Vary bandwidth (okay as is in no noise setting)
   NW_regression_result <- NW_regression_cpp(eval_grid, limit_cycle.data.matrix, nw_bw_matrix)
   nw_field_plot <- ggplot_field(limit_cycle.data, eval_grid, NW_regression_result, title="NW Kernel Regression")
-  nw_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid, NW_regression_result, nw_bw, title = paste(model_title, "lsoda Solutions Along NW Gradient Field", sep = ": "))
+  nw_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid,
+                                               "nw", NW_regression_result, nw_bandwidth,
+                                               title = paste(model_title, "lsoda Solutions Along NW Gradient Field", sep = ": "))
   
   # LOESS
-  loess_bw = .1
-  loess_fit <- eval_loess_fit(eval_grid, limit_cycle.data.matrix, loess_bw)
+  loess_fit <- eval_loess_fit(eval_grid, limit_cycle.data.matrix, loess_bandwidth)
   loess_field_plot <- ggplot_field(limit_cycle.data, eval_grid, loess_fit, title="LOESS")
   loess_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid, 
-                                                  loess_fit, loess_bw, loess = T, title = paste(model_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
+                                                  "loess", loess_fit, loess_bandwidth,
+                                                  title = paste(model_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
   
   # kNN
   # TODO: Implement
@@ -222,7 +227,7 @@ ggplot_field <- function(ls_samples, eval_grid, gradient_data, title=""){
   return(field_plot)
 }
 
-plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, loess = F, num_reps = 9, title =""){
+plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient_data, bw, num_reps = 9, samples_per_path = 500, title =""){
   # generate random solution paths using the NW or LOESS estimated gradient field
   # TODO: add splines and KNN
   plot_list <- list()
@@ -231,12 +236,22 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, l
   
 
   for (i in 1:num_reps){
-      if (loess){
-        trajectory <- generate_loess_path(ls_samples, bw, num_samples = 200)
+      if (method_str == "loess"){
+        trajectory <- generate_loess_path(ls_samples, bw, num_samples = samples_per_path)
+      }
+      else if (method_str == "nw"){
+        trajectory <- generate_nw_path(ls_samples, bw, num_samples = samples_per_path)
+      }
+      else if (method_str == "spline"){
+        stop("Method not implemented")
+      }
+      else if (method_str == "knn"){
+        stop("Method not implemented")
       }
       else{
-        trajectory <- generate_nw_path(ls_samples, bw, num_samples = 200)
+        stop("Method not implemented")
       }
+    
       trajectory_tibble <- tibble(x = trajectory[,1], y = trajectory[,2], u = NA, v = NA, run = i)
       path_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
         geom_quiver(color = "#003262") +
@@ -263,8 +278,8 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, gradient_data, bw, l
 # 2) Estimate gradient fields and generate comparsion plots
 # TODO: Find true gradient field in step 1 instead of 2
 
-#abhi_data <- generate_limit_cycle_data("abhi", c())
-#evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
+abhi_data <- generate_limit_cycle_data("abhi", c())
+evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
 
 #vp_data.stiff <- generate_limit_cycle_data("van_der_pol", c(20))
 #evaluate_gradient_methods(vp_data.stiff, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
