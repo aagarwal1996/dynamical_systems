@@ -267,7 +267,6 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient
   
 }
 
-
 ################
 ## Evaluation ##
 ################
