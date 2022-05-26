@@ -147,11 +147,11 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   # Generate plots
   
   # get truth over evaluation grid
-  true_field <- generate_grid_data(model_str, c(2),eval_grid)
+  true_field <- generate_grid_data(model_str, model_params, eval_grid)
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
   # b-splines (mix of R and C++)
-  spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid)
+  spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid, plot_penalty = TRUE)
   spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result, title="Spline")
   # TODO: Implement
   
@@ -217,8 +217,8 @@ ggplot_field <- function(ls_samples, eval_grid, gradient_data, title=""){
   # plot a gradient field with limit cycle samples overlayed
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
   gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
-  
-  field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
+
+    field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
     geom_quiver(color = "#003262") +
     geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
     labs(title = title)

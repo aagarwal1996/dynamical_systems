@@ -34,9 +34,3 @@ mat fit_bsplines_cpp(mat x_basis, mat y_basis, mat x_penalty, mat y_penalty,
 
   return coeff_mat;
 }
-
-
-
-
-
-

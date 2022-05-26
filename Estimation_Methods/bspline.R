@@ -32,8 +32,7 @@ calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nb
     plot_spline_penalty(x_grid,y_grid, spline.fd_x, spline.fd_y, penalty_order)
   }
 
-  return()
-  #return(spline_field)
+  return(spline_field)
 }
   
 plot_spline_penalty <- function(x_grid, y_grid, spline_bifd_x, spline_bifd_y, penalty_order = 2){
@@ -66,19 +65,19 @@ plot_spline_penalty <- function(x_grid, y_grid, spline_bifd_x, spline_bifd_y, pe
             bottom.label.text.angle = 270,
             title = "Second Derivative Penalty for y Over Grid")
   
-  eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
-  long_penalty_x <- cbind(eval_grid, c(t(grid_penalty_x)))
-  colnames(long_penalty_x) <- c("x", "y", "penalty")
-  x_penalty_plot <- ggplot(data.frame(long_penalty_x), aes(x, y, fill=penalty)) + 
-    geom_raster() +
-    labs(title="Second Derivative Penalty for x Over Grid")
-  print(x_penalty_plot)
-  long_penalty_y <- cbind(eval_grid, c(t(grid_penalty_y)))
-  colnames(long_penalty_y) <- c("x", "y", "penalty")
-  y_penalty_plot <- ggplot(data.frame(long_penalty_y), aes(x, y, fill=penalty)) + 
-    geom_raster() +
-    labs(title = "Second Derivative Penalty for y Over Grid")
-  print(y_penalty_plot)
+  #eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid)))
+  #long_penalty_x <- cbind(eval_grid, c(t(grid_penalty_x)))
+  #colnames(long_penalty_x) <- c("x", "y", "penalty")
+  #x_penalty_plot <- ggplot(data.frame(long_penalty_x), aes(x, y, fill=penalty)) + 
+  #  geom_raster() +
+  #  labs(title="Second Derivative Penalty for x Over Grid")
+  #print(x_penalty_plot)
+  #long_penalty_y <- cbind(eval_grid, c(t(grid_penalty_y)))
+  #colnames(long_penalty_y) <- c("x", "y", "penalty")
+  #y_penalty_plot <- ggplot(data.frame(long_penalty_y), aes(x, y, fill=penalty)) + 
+  #  geom_raster() +
+  #  labs(title = "Second Derivative Penalty for y Over Grid")
+  #print(y_penalty_plot)
   
   return()
 }
@@ -110,7 +109,7 @@ bifd_spline_gradient <- function(t,x,p,sfd_x,sfd_y){
 
 ### Testing
 
-abhi_data <- generate_limit_cycle_data("abhi", c())
-calculate_spline_gradient_field(abhi_data,
-                                seq(-3,3,length.out=20), seq(-9,9,length.out=30),
-                                plot_penalty = TRUE)
+#abhi_data <- generate_limit_cycle_data("abhi", c())
+#calculate_spline_gradient_field(abhi_data,
+#                                seq(-3,3,length.out=20), seq(-9,9,length.out=30),
+#                                plot_penalty = TRUE)
