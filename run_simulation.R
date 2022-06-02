@@ -12,6 +12,7 @@ library(ggpubr) # to generate side-by-side plots
 
 source(here::here('Data_Generation/data_generation.R')) # functions to generate data from specific DS are in another file
 source(here::here('Estimation_Methods/bspline.R'))
+source(here::here('Estimation_Methods/knn.R'))
 library(Rcpp)
 sourceCpp(here::here('Estimation_Methods/nw_regression.cpp'))
 sourceCpp(here::here('Estimation_Methods/loess.cpp'))
@@ -150,10 +151,19 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
   true_field <- generate_grid_data(model_str, model_params, eval_grid)
   true_field_plot <- ggplot_field(limit_cycle.data, eval_grid, true_field, title="Truth")
   
+  # kNN
+  nn_fit <- eval_knn_fit(eval_grid, limit_cycle.data.matrix,1)
+  nn_field_plot <- ggplot_field(limit_cycle.data, eval_grid, nn_fit, title="1-NN")
+
+  multi_nn_fit <- eval_knn_fit(eval_grid, limit_cycle.data.matrix,400)
+  multi_nn_field_plot <- ggplot_field(limit_cycle.data, eval_grid, multi_nn_fit, title="400-NN")
+
   # b-splines (mix of R and C++)
-  spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid, plot_penalty = TRUE)
-  spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result, title="Spline")
-  # TODO: Implement
+  spline_result <- calculate_spline_gradient_field(limit_cycle.data, x_grid, y_grid, plot_penalty = FALSE)
+  spline_field_plot <- ggplot_field(limit_cycle.data, eval_grid, spline_result$field, title="Spline")
+  spline_gradient_plot <- plot_gradient_path_multi(limit_cycle.data.matrix, eval_grid,
+                                               "spline", spline_result$field, list(fdx = spline_result$fdx, fdy = spline_result$fdy),
+                                               title = paste(model_title, "lsoda Solutions Along Spline Gradient Field", sep = ": "))
   
   # NW
   nw_bw_matrix <- nw_bandwidth*diag(2) # TODO: Vary bandwidth (okay as is in no noise setting)
@@ -170,16 +180,16 @@ evaluate_gradient_methods <- function(data, model_str, model_params, tail_n = 70
                                                   "loess", loess_fit, loess_bandwidth,
                                                   title = paste(model_title, "lsoda Solutions Along LOESS Gradient Field", sep = ": "))
   
-  # kNN
-  # TODO: Implement
-  
   # Output plots
   # TODO: Add spline solution path plot
-  field_plots <- ggarrange(true_field_plot, spline_field_plot, nw_field_plot, loess_field_plot, ncol=4, nrow=1)
+  field_plots <- ggarrange(true_field_plot, nn_field_plot, multi_nn_field_plot,
+                           spline_field_plot, nw_field_plot, loess_field_plot,
+                           ncol=3, nrow=2)
   field_plots <- annotate_figure(field_plots, top = text_grob(label = model_title))
   print(field_plots)
   print(nw_gradient_plot)
   print(loess_gradient_plot)
+  print(spline_gradient_plot)
 }
 
 ####################
@@ -213,22 +223,24 @@ plot_observations <- function(data){
     labs(x="x",y="y",title="Observations from a Dynamical System")
 }
 
-ggplot_field <- function(ls_samples, eval_grid, gradient_data, title=""){
+ggplot_field <- function(ls_samples, eval_grid, gradient_data, title="", rescale = 0.005){
   # plot a gradient field with limit cycle samples overlayed
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
-  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
+  gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], 
+                            u = rescale*gradient_data[,1], v =rescale*gradient_data[,2])
 
     field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
-    geom_quiver(color = "#003262") +
+    geom_quiver(color = "#003262", vecsize = 0) +
     geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
     labs(title = title)
   
   return(field_plot)
 }
 
-plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient_data, bw, num_reps = 9, samples_per_path = 500, title =""){
+plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient_data, params, num_reps = 9, samples_per_path = 500, title =""){
   # generate random solution paths using the NW or LOESS estimated gradient field
   # TODO: add splines and KNN
+  # TODO make 
   plot_list <- list()
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
   gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], u = gradient_data[,1], v = gradient_data[,2])
@@ -236,13 +248,13 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient
 
   for (i in 1:num_reps){
       if (method_str == "loess"){
-        trajectory <- generate_loess_path(ls_samples, bw, num_samples = samples_per_path)
+        trajectory <- generate_loess_path(ls_samples, params, num_samples = samples_per_path)
       }
       else if (method_str == "nw"){
-        trajectory <- generate_nw_path(ls_samples, bw, num_samples = samples_per_path)
+        trajectory <- generate_nw_path(ls_samples, params, num_samples = samples_per_path)
       }
       else if (method_str == "spline"){
-        stop("Method not implemented")
+        trajectory <- generate_spline_path(ls_samples, params, num_samples = samples_per_path)
       }
       else if (method_str == "knn"){
         stop("Method not implemented")
@@ -274,13 +286,12 @@ plot_gradient_path_multi <- function(ls_samples, eval_grid, method_str, gradient
 # Two step procedure:
 # 1) Generate limit cycle data
 # 2) Estimate gradient fields and generate comparsion plots
-# TODO: Find true gradient field in step 1 instead of 2
 
-abhi_data <- generate_limit_cycle_data("abhi", c())
-evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
+#abhi_data <- generate_limit_cycle_data("abhi", c())
+#evaluate_gradient_methods(abhi_data, "abhi", c(), extrapolation_size = 1, model_title = "Abhi's Van der Pol")
 
 #vp_data.stiff <- generate_limit_cycle_data("van_der_pol", c(20))
-#evaluate_gradient_methods(vp_data.stiff, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 1, model_title = "Van der Pol; mu = 20")
+#evaluate_gradient_methods(vp_data.stiff, model_str = "van_der_pol", model_params = c(20), extrapolation_size = 0, model_title = "Van der Pol; mu = 20")
  
-#vp_data.nonstiff <- generate_limit_cycle_data("van_der_pol", c(.5))
-#evaluate_gradient_methods(vp_data.nonstiff, model_str = "van_der_pol", model_params = c(0.5), extrapolation_size = 1, model_title = "Van der Pol; mu = 0.5")
+#vp_data.nonstiff <- generate_limit_cycle_data("van_der_pol", c(1.5))
+#evaluate_gradient_methods(vp_data.nonstiff, model_str = "van_der_pol", model_params = c(0.5), extrapolation_size = 1, model_title = "Van der Pol; mu = 1.5")

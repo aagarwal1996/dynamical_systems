@@ -2,6 +2,8 @@
 ## Data Generation
 ##
 
+source(here::here('Estimation_Methods/bspline.R'))
+
 # TODO: Add observation noise
 
 get_abhi_data <- function(){
@@ -112,7 +114,8 @@ nw_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
-generate_nw_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
+generate_nw_path <- function(data, bw, num_samples = 2000, sample_density = 0.1,
+                             extrapolation_size = 0.5){
   # function which generates a random trajectory along the gradient field
   # of a NW kernel regression fit. The IC is randomized
   # 
@@ -125,8 +128,11 @@ generate_nw_path <- function(data, bw, num_samples = 2000, sample_density = 0.1)
   # sampled_path (data.frame): num_samples samples; columns in [x,y]
   
   # the only parameter for this model is mu
-  # randomly pick the IC in [-10, 10] x [-10, 10]
-  initial_condition <- runif(2, min = -6, max = 6)
+  # randomly pick the IC
+  initial_condition <- c(runif(1, min = min(data[,1]-extrapolation_size), 
+                               max = max(data[,1]+extrapolation_size)),
+                         runif(1, min = min(data[,2]-extrapolation_size), 
+                               max = max(data[,2]+extrapolation_size)))
   names(initial_condition) <- c('x','y')
   bw_matrix <- bw*diag(2)
   # compute the prediction and its gradient at each sample
@@ -146,7 +152,8 @@ loess_path_helper <- function(t,y,parms){
   return(grad_pred.lsoda)
 }
 
-generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
+generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0.1,
+                                extrapolation_size = 0.5){
   # function which generates a random trajectory along the gradient field
   # of the LOESS Solution. The IC is randomized
   # 
@@ -159,8 +166,11 @@ generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0
   # sampled_path (data.frame): num_samples samples; columns in [x,y]
   
   # the only parameter for this model is mu
-  # randomly pick the IC in [-10, 10] x [-10, 10]
-  initial_condition <- runif(2, min = -6, max = 6)
+  # randomly pick the 
+  initial_condition <- c(runif(1, min = min(data[,1]-extrapolation_size), 
+                               max = max(data[,1]+extrapolation_size)),
+                         runif(1, min = min(data[,2]-extrapolation_size), 
+                               max = max(data[,2]+extrapolation_size)))
   names(initial_condition) <- c('x','y')
   bw_matrix <- bw*diag(2)
   # compute the prediction and its gradient at each sample
@@ -171,25 +181,16 @@ generate_loess_path <- function(data, bw, num_samples = 2000, sample_density = 0
 
 ## b-splines
 
-generate_spline_path <- function(data, bw, num_samples = 2000, sample_density = 0.1){
-  # function which generates a random trajectory along the gradient field
-  # of the LOESS Solution. The IC is randomized
-  # 
-  ## Inputs:
-  # data (matrix): matrix of limit cycle data to regress on; columns (x,y,f_x,f_y)
-  # bw (double): parameter which controls Kernel bandwidth (isotropic Normal variance)
-  # num_samples (integer)[optional]: number of samples to generate
-  #
-  ## Outputs:
-  # sampled_path (data.frame): num_samples samples; columns in [x,y]
-  
-  # the only parameter for this model is mu
-  # randomly pick the IC in [-10, 10] x [-10, 10]
-  initial_condition <- runif(2, min = -6, max = 6)
+generate_spline_path <- function(data, sfd_list, num_samples = 2000, sample_density = 0.1,
+                                 extrapolation_size = 0.5){
+  initial_condition <- c(runif(1, min = min(data[,1]-extrapolation_size), 
+                               max = max(data[,1]+extrapolation_size)),
+                         runif(1, min = min(data[,2]-extrapolation_size), 
+                               max = max(data[,2]+extrapolation_size)))
   names(initial_condition) <- c('x','y')
-  bw_matrix <- bw*diag(2)
+  
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),nw_path_helper,list(data,bw_matrix)))
+  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),bifd_spline_gradient,sfd_list))
   return(traj[,-1])
   
 }

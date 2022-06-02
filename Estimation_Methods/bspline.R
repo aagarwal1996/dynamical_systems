@@ -32,7 +32,7 @@ calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nb
     plot_spline_penalty(x_grid,y_grid, spline.fd_x, spline.fd_y, penalty_order)
   }
 
-  return(spline_field)
+  return(list(field = spline_field, fdx = spline.fd_x, fdy = spline.fd_y))
 }
   
 plot_spline_penalty <- function(x_grid, y_grid, spline_bifd_x, spline_bifd_y, penalty_order = 2){
@@ -100,7 +100,9 @@ generate_bspline_basis <- function(data, x_grid, y_grid, norder = 4, nbasis = 12
   return(spline_fit_list)
 }
 
-bifd_spline_gradient <- function(t,x,p,sfd_x,sfd_y){
+bifd_spline_gradient <- function(t,x,params){
+  sfd_x = params$fdx
+  sfd_y = params$fdy
   # Helper function for `lsoda` which evaluates derivatives of a spline fit
   dx = eval.bifd(x[1],x[2],sfd_x)
   dy = eval.bifd(x[1],x[2],sfd_y)
