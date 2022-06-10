@@ -10,7 +10,7 @@ using namespace arma;
 //'
 // [[Rcpp::export(fit_bsplines_cpp)]]
 mat fit_bsplines_cpp(mat x_basis, mat y_basis, mat x_penalty, mat y_penalty,
-                     vec x_obs, vec y_obs, double lambda = 1e-8){
+                     vec x_obs, vec y_obs, double lambda){
 
   int num_basis_fns = x_basis.n_cols;
   rowvec kroenecker_ones;

@@ -6,14 +6,14 @@ library(superheat)
 sourceCpp(here::here('Estimation_Methods/bspline.cpp'))
 
 calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nbasis = 12,
-                                            penalty_order = 2, plot_penalty = FALSE){
+                                            penalty_order = 2, lambda = 1e-8, plot_penalty = FALSE){
   # evaluate b-spline basis functions at coordinates in data (N x 2 matrix)
   bspline_basis_fns <- generate_bspline_basis(data, x_grid, y_grid, norder = norder, 
                                               nbasis = nbasis, penalty_order = penalty_order)
   
   bspline_fit_coeffs <- fit_bsplines_cpp(bspline_basis_fns$xbasis.eval, bspline_basis_fns$ybasis.eval,
                                   bspline_basis_fns$xpenalty, bspline_basis_fns$ypenalty,
-                                  data$f_x, data$f_y)
+                                  data$f_x, data$f_y, lambda)
   
   # create bivariate functional data objects for our fit splines 
   spline.fd_x <- bifd(t(matrix(bspline_fit_coeffs[,1],12,12)), 
