@@ -225,7 +225,14 @@ plot_solution_paths <- function(data, grid, estimators,
   return()
 }
 
-nonstiff_mu <- 20
+
+#################
+## Evaluation ##
+################
+
+nonstiff_mu <- 1.5 # CHANGE MU HERE
+
+# define estimation methods
 truth_nonstiff <- list(method = "truth",  params = list(mu = nonstiff_mu))
 one_nn <- list(method = "knn",  params = list(k = 1))
 nw_base <- list(method = "nw",  params = list(h = 0.01))
@@ -236,15 +243,12 @@ spline <- list(method = "spline",  params = list(lambda = 1e-8))
 spline2 <- list(method = "spline",  params = list(lambda = 1))
 spline3 <- list(method = "spline",  params = list(lambda = 5))
 spline_bigpen <- list(method = "spline",  params = list(lambda = 30))
+
+# list of estimation methods to plot
 #nonstiff_estimator_list <- list(truth_nonstiff, one_nn, nw_base, many_nn, loess, spline)
-nonstiff_estimator_list <- list(truth_nonstiff, zero_spline, spline)
+nonstiff_estimator_list <- list(truth_nonstiff, zero_spline, spline) # TO PLOT
 
- 
-#################
-## Evaluation ##
-################
-
-nonstiff_mu <- 20
+# run experiment
 vp_nonstiff_samples <- generate_limit_cycle_data("van_der_pol", c(nonstiff_mu))
 vp_nonstiff_list <- list(system = "van_der_pol", params = list(mu = nonstiff_mu), limit_cycle_samples = vp_nonstiff_samples)
 evaluate_gradient_methods(vp_nonstiff_list, nonstiff_estimator_list)
