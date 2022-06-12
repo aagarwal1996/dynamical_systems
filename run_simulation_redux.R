@@ -141,7 +141,33 @@ evaluate_gradient_methods <- function(data_list, estimator_list){
 ## Visualization ##
 ###################
 
+plot_estimated_fields <- function(plot_specifications, experiment_outcome){
+  n_col = min(3, length(plot_specifications))
+  plot_list <- list()
+  for (i in 1:length(plot_specifications)){
+    data_num <- plot_specifications[[i]][1]
+    estimator_num <- plot_specifications[[i]][2]
+    plot_list[[i]] <- experiment_outcome[[data_num]]$estimates[[estimator_num]]$field_plot
+  }
+  
+  field_plots <- cowplot::plot_grid(plotlist = plot_list, ncol = n_col)
+  print(field_plots)
+}
+
+
 visualize_results <- function(experiment_outcome, plot_list){
+  
+  for (plot in plot_list){
+    if (plot$type == "field"){
+      plot_estimated_fields(plot$experiments, experiment_outcome)
+    }  
+    else if (plot$type == "solution_path"){
+      print("Plot not implemented")
+    }
+    else {
+      print("Plot not implemented")
+    }
+  }
   #all_fields <- plot_estimated_fields(data_list, estimators_list)
   #print(all_fields)
   #all_paths <- plot_solution_paths(data_list, grid_object, estimators_list)
@@ -173,7 +199,7 @@ experiment_estimators <- list(truth, spline1, spline2)
 
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
-plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
+plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 3), c(data = 2, estimator = 2)))
 plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
 to_plot <- list(plot1, plot2)
 visualize_results(experiment_results, to_plot)
