@@ -24,7 +24,6 @@ sourceCpp(here::here('Estimation_Methods/loess.cpp'))
 generate_limit_cycle_data <- function(system, params, var_x, var_y, sample_seed = 2022,
                                       num_samples = 1500, sample_density = 0.1,
                                       use_seed = F, save_csv = F){  
-  
   set.seed(sample_seed)
   
   if (system == "van_der_pol"){
@@ -36,8 +35,6 @@ generate_limit_cycle_data <- function(system, params, var_x, var_y, sample_seed 
   else{
     stop('Error: ', system, ' system not implemented.')
   }
-  
-  
   
   if (save_csv){
     # TODO: improve file name
@@ -72,17 +69,106 @@ generate_data_object <- function(experiment_list,
     var_y <- data_list[[i]]$var_y
     
     # generate data
-    data_list[[i]]$data <- generate_limit_cycle_data(system_name, system_params, 
+    data_list[[i]]$limit_cycle_samples <- generate_limit_cycle_data(system_name, system_params, 
                                    var_x = var_x, var_y = var_y, sample_seed = sample_seed,
                                    num_samples = num_samples, sample_density = sample_density,
                                    save_csv = save_csv)
+    
+    # truncate to tail
+    data_list[[i]]$limit_cycle_tail <- tail(data_list[[i]]$limit_cycle_samples, n = data_list[[i]]$lc_tail_n)
+    
+    # build grid to evaluate over
+    grid_object <- list(xmin = min(data_list[[i]]$limit_cycle_tail$x),
+                        xmax = max(data_list[[i]]$limit_cycle_tail$x),
+                        ymin = min(data_list[[i]]$limit_cycle_tail$y),
+                        ymax = max(data_list[[i]]$limit_cycle_tail$y)) 
+    #View(data_list[[i]])
+    grid_object$x_grid = seq(floor(grid_object$xmin) - data_list[[i]]$extrapolation_size , ceiling(grid_object$xmax) + data_list[[i]]$extrapolation_size, 
+                             len = data_list[[i]]$x_grid_size)
+    grid_object$y_grid = seq(floor(grid_object$ymin) - data_list[[i]]$extrapolation_size, ceiling(grid_object$ymax) + data_list[[i]]$extrapolation_size, 
+                             len = data_list[[i]]$y_grid_size)
+    grid_object$eval_grid = unname(as.matrix(expand.grid(grid_object$x_grid,grid_object$y_grid)))
+    
+    data_list[[i]]$grid <-grid_object
   }
   
   return(data_list)
 }
 
-# sample_experiment <- list(name = "test", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 1)
-# y_noisy <- list(name = "noisy_y", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 100)
-# experiment_list <- list(sample_experiment, y_noisy)
-# test_result <- generate_data_object(experiment_list)
-# View(test_result)
+################
+## Evaluation ##
+################
+
+
+evaluate_gradient_single <- function(data_list, estimators_list, 
+                                      lc_tail_n = 700, 
+                                      x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5){
+  
+  for (i in 1:length(estimators_list)){
+    
+    if (estimators_list[[i]]$method == "truth"){
+      stop("Not yet fixed")
+    }
+    
+    else if (estimators_list[[i]]$method == "spline"){
+      spline_result <- get_gradient_field(data_list, grid_object, estimators_list[[i]])
+      estimators_list[[i]]$estimated_field = spline_result$field
+      estimators_list[[i]]$sfd_list = spline_result$sfd_list
+    }
+    
+    else{
+      estimators_list[[i]]$estimated_field = get_gradient_field(data_list, grid_object, estimators_list[[i]])
+    }
+    
+    estimators_list[[i]]$field_plot = ggplot_field(data_list$limit_cycle_tail, grid_object$eval_grid, 
+                                                   estimators_list[[i]]$estimated_field, rescale = .025,
+                                                   title=paste(estimators_list[[i]]$method, 
+                                                               paste(names(estimators_list[[i]]$params), estimators_list[[i]]$params,
+                                                                     sep = ":", collapse = ",")))
+  }
+  
+  return(estimators_list)
+  #all_fields <- plot_estimated_fields(data_list, estimators_list)
+  #print(all_fields)
+  #all_paths <- plot_solution_paths(data_list, grid_object, estimators_list)
+}
+
+evaluate_gradient_methods <- function(data_list, estimator_list){
+  
+  for (i in 1:length(data_list)){
+    estimation_results <- evaluate_gradient_single(data_list[[i]], estimator_list)  
+    data_list[[i]]$estimates <- estimation_results
+  }
+  
+  return(data_list)
+
+}
+
+#############
+## Testing ##
+#############
+
+# specify data
+no_noise <- list(name = "test", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 0,
+                 lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
+some_noise <- list(name = "noisy_y", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 1, var_y = 1,
+                   lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
+
+experiment_list <- list(no_noise, some_noise)
+experiment_data <- generate_data_object(experiment_list)
+View(experiment_data)
+
+# specify estimators
+truth <- list(method = "truth",  params = list())
+one_nn <- list(method = "knn",  params = list(k = 1))
+many_nn <- list(method = "knn",  params = list(k = 400))
+nw_base <- list(method = "nw",  params = list(h = 0.01))
+loess <- list(method = "loess",  params = list(h = 0.1))
+spline1 <- list(method = "spline",  params = list(lambda = 1e-16))
+spline2 <- list(method = "spline",  params = list(lambda = 1e-8))
+spline3 <- list(method = "spline",  params = list(lambda = 1))
+# pick estimators to run on each data set
+experiment_estimators <- list(truth, spline1, spline2)
+
+experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
+View(experiment_results)
