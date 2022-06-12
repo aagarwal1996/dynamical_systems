@@ -104,7 +104,7 @@ van_der_pol_gradient_helper <- function(v, mu){
 
 ## Truth
 
-generate_true_path_vdp <- function(data, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_true_path_vdp <- function(data, mu, initial_condition, num_samples = 500, sample_density = 0.1){
   # function which generates a random trajectory along the true gradient field
   # NOTE currently for VdP ONLY
   #
@@ -115,7 +115,6 @@ generate_true_path_vdp <- function(data, initial_condition, num_samples = 500, s
   ## Outputs:
   # sampled_path (data.frame): num_samples samples; columns in [x,y]
   
-  mu <- data$params$mu
   initial_condition <- unlist(initial_condition)
   # compute the prediction and its gradient at each sample
   traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_van_der_pol_gradient, mu))
@@ -153,7 +152,7 @@ generate_nw_path <- function(data, estimator, initial_condition, num_samples = 5
   bw_matrix <- h*diag(2)
   # compute the prediction and its gradient at each sample
   traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
-                           nw_path_helper,list(as.matrix(data$limit_cycle_tail),bw_matrix)))
+                           nw_path_helper,list(as.matrix(data),bw_matrix)))
   return(traj[,-1])
   
 }
@@ -177,14 +176,14 @@ generate_loess_path <- function(data, estimator, initial_condition, num_samples 
   initial_condition <- unlist(initial_condition)
   # compute the prediction and its gradient at each sample
   traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
-                           loess_path_helper,list(as.matrix(data$limit_cycle_tail),h)))
+                           loess_path_helper,list(as.matrix(data),h)))
   return(traj[,-1])
   
 }
 
 ## b-splines
 
-generate_spline_path <- function(data, estimator, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_spline_path <- function(estimator, initial_condition, num_samples = 500, sample_density = 0.1){
   initial_condition <- unlist(initial_condition)
   
   # compute the prediction and its gradient at each sample
@@ -224,7 +223,7 @@ generate_knn_path <- function(data, estimator, initial_condition, num_samples = 
   initial_condition <- unlist(initial_condition)
   
   traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
-                           knn_path_helper,list(as.matrix(data$limit_cycle_tail),k)))
+                           knn_path_helper,list(as.matrix(data),k)))
   return(traj[,-1])
   
 }
@@ -296,10 +295,14 @@ get_gradient_field <- function(data, estimator){
   return(evaluated_field)
 }
 
-generate_solution_path <- function(data, grid, estimator, initial_condition){
-  if ((estimator$method == "truth") & (data$system == "van_der_pol")){
-    evaluated_field <- generate_true_path_vdp(data, initial_condition)
-  }
+generate_solution_path <- function(data, estimator, initial_condition){
+  evaluated_field <- NA
+  
+  if (estimator$method == "truth"){
+    if (estimator$params$name == "van_der_pol"){
+      evaluated_field <- generate_true_path_vdp(data, estimator$params$mu, initial_condition) 
+      }
+    }
   else if (estimator$method == "knn"){
     evaluated_field <- generate_knn_path(data, estimator, initial_condition)
   }
@@ -310,11 +313,8 @@ generate_solution_path <- function(data, grid, estimator, initial_condition){
     evaluated_field <- generate_loess_path(data, estimator, initial_condition)
   }
   else if (estimator$method == "spline"){
-    evaluated_field <- generate_spline_path(data, estimator, initial_condition)
+    evaluated_field <- generate_spline_path(estimator, initial_condition)
   }
-  else {
-    evaluated_field <- NA
-  }
-  
+
   return(evaluated_field)
 }
