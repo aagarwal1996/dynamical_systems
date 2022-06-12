@@ -46,7 +46,7 @@ generate_van_der_pol <- function(params, num_samples = 1500, sample_density = 0.
   
   # the only parameter for this model is mu
   if (length(params)>1){stop('Error: Too many Van Der Pol parameters')}
-  mu <- params[1]
+  mu <- params$mu
   
   # randomly pick the IC in [-10, 10] x [-10, 10]
   initial_condition <- runif(2, min = -10, max = 10)
@@ -81,6 +81,7 @@ eval_van_der_pol_gradient <- function(t, v, mu, list = F){
 }
 
 van_der_pol_gradient_helper <- function(v, mu){
+
   # redcued form not for lsoa
   x <- v[1]
   y <- v[2]
@@ -264,7 +265,9 @@ generate_true_grid_data <- function(model, params, eval_grid){
 ### Generalized ###
 ###################
 
-get_gradient_field <- function(data, grid, estimator){
+get_gradient_field <- function(data, estimator){
+  
+  grid <- data$grid
   
   if (estimator$method == "spline"){
       spline_fit <- calculate_spline_gradient_field(data$limit_cycle_tail,

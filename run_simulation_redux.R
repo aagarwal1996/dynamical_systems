@@ -100,27 +100,23 @@ generate_data_object <- function(experiment_list,
 ################
 
 
-evaluate_gradient_single <- function(data_list, estimators_list, 
+evaluate_gradient_single <- function(data_object, estimators_list, 
                                       lc_tail_n = 700, 
                                       x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5){
   
   for (i in 1:length(estimators_list)){
     
-    if (estimators_list[[i]]$method == "truth"){
-      stop("Not yet fixed")
-    }
-    
-    else if (estimators_list[[i]]$method == "spline"){
-      spline_result <- get_gradient_field(data_list, grid_object, estimators_list[[i]])
+    if (estimators_list[[i]]$method == "spline"){
+      spline_result <- get_gradient_field(data_object, estimators_list[[i]])
       estimators_list[[i]]$estimated_field = spline_result$field
       estimators_list[[i]]$sfd_list = spline_result$sfd_list
     }
     
     else{
-      estimators_list[[i]]$estimated_field = get_gradient_field(data_list, grid_object, estimators_list[[i]])
+      estimators_list[[i]]$estimated_field = get_gradient_field(data_object, estimators_list[[i]])
     }
     
-    estimators_list[[i]]$field_plot = ggplot_field(data_list$limit_cycle_tail, grid_object$eval_grid, 
+    estimators_list[[i]]$field_plot = ggplot_field(data_object$limit_cycle_tail, data_object$grid$eval_grid, 
                                                    estimators_list[[i]]$estimated_field, rescale = .025,
                                                    title=paste(estimators_list[[i]]$method, 
                                                                paste(names(estimators_list[[i]]$params), estimators_list[[i]]$params,
@@ -128,9 +124,6 @@ evaluate_gradient_single <- function(data_list, estimators_list,
   }
   
   return(estimators_list)
-  #all_fields <- plot_estimated_fields(data_list, estimators_list)
-  #print(all_fields)
-  #all_paths <- plot_solution_paths(data_list, grid_object, estimators_list)
 }
 
 evaluate_gradient_methods <- function(data_list, estimator_list){
@@ -144,19 +137,27 @@ evaluate_gradient_methods <- function(data_list, estimator_list){
 
 }
 
+###################
+## Visualization ##
+###################
+
+visualize_results <- function(experiment_outcome, plot_list){
+  #all_fields <- plot_estimated_fields(data_list, estimators_list)
+  #print(all_fields)
+  #all_paths <- plot_solution_paths(data_list, grid_object, estimators_list)
+} 
+
 #############
 ## Testing ##
 #############
 
 # specify data
-no_noise <- list(name = "test", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 0,
+no_noise <- list(name = "test", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 0,
                  lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
-some_noise <- list(name = "noisy_y", system = "van_der_pol", params = c(1.5), n = 1000, sample_density = 0.1, var_x = 1, var_y = 1,
+some_noise <- list(name = "noisy_y", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 1, var_y = 1,
                    lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
-
 experiment_list <- list(no_noise, some_noise)
 experiment_data <- generate_data_object(experiment_list)
-View(experiment_data)
 
 # specify estimators
 truth <- list(method = "truth",  params = list())
@@ -171,4 +172,9 @@ spline3 <- list(method = "spline",  params = list(lambda = 1))
 experiment_estimators <- list(truth, spline1, spline2)
 
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
-View(experiment_results)
+
+plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
+plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
+to_plot <- list(plot1, plot2)
+visualize_results(experiment_results, to_plot)
+
