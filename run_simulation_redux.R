@@ -120,11 +120,14 @@ evaluate_gradient_single <- function(data_object, estimators_list,
       estimators_list[[i]]$estimated_field = get_gradient_field(data_object, estimators_list[[i]])
     }
     
+    title_str = title_str = paste("Data Set: ", data_object$name,
+                                  "\nEstimator: ", estimators_list[[i]]$method,
+                                  "\nParams: ", paste(names(estimators_list[[i]]$params),
+                                                      estimators_list[[i]]$params, sep = ":", collapse = ", "))
+    
     estimators_list[[i]]$field_plot = ggplot_field(data_object$limit_cycle_tail, data_object$grid$eval_grid, 
                                                    estimators_list[[i]]$estimated_field, rescale = .025,
-                                                   title=paste(estimators_list[[i]]$method, 
-                                                               paste(names(estimators_list[[i]]$params), estimators_list[[i]]$params,
-                                                                     sep = ":", collapse = ",")))
+                                                   title=title_str)
   }
   
   return(estimators_list)
@@ -187,14 +190,13 @@ get_shared_ic <- function(ls_samples){
   return(ic_samples)
 }
 
-plot_single_solution_path <- function(solution_path_list, lc_data){
+plot_single_solution_path <- function(solution_path_list, lc_data, title_str = ""){
 
   within_tibble <- tibble(x = solution_path_list$Within$x, y = solution_path_list$Within$y)
   on_tibble <- tibble(x = solution_path_list$On$x, y = solution_path_list$On$y)
   outside_close_tibble <- tibble(x = solution_path_list$OutsideClose$x, y = solution_path_list$OutsideClose$y)
   outside_far_tibble <- tibble(x = solution_path_list$OutsideFar$x, y = solution_path_list$OutsideFar$y)
 
-  gradient_tibble <- tibble(x = c(), y = c())
   # TODO: Plot field
   #gradient_tibble <- cbind(grid$eval_grid, estimators[[i]]$estimated_field)
   #colnames(gradient_tibble) <- c("x","y","u","v")
@@ -208,10 +210,8 @@ plot_single_solution_path <- function(solution_path_list, lc_data){
     geom_path(data = outside_close_tibble, aes(x = x, y = y), color = "green") +
     geom_point(x = as.numeric(outside_close_tibble[1,1]), y =as.numeric(outside_close_tibble[1,2]), color = "green", size = 3) + 
     geom_path(data = outside_far_tibble, aes(x = x, y = y), color = "purple") +
-    geom_point(x = as.numeric(outside_far_tibble[1,1]), y =as.numeric(outside_far_tibble[1,2]), color = "purple", size = 3) #+
-    #labs(title=paste(estimators[[i]]$method, 
-    #                 paste(names(estimators[[i]]$params), estimators[[i]]$params,
-    #                       sep = ":", collapse = ",")))
+    geom_point(x = as.numeric(outside_far_tibble[1,1]), y =as.numeric(outside_far_tibble[1,2]), color = "purple", size = 3) +
+    labs(title=title_str) 
   
   return(path_plot)
 }
@@ -233,8 +233,11 @@ plot_solution_paths <- function(plot_specifications, experiment_outcome,
                                                        shared_ic[j,])
     }
     names(ic_results_list) <- rownames(shared_ic)
-    
-    solution_path_plot <- plot_single_solution_path(ic_results_list, experiment_outcome[[data_num]]$limit_cycle_tail)
+    title_str = paste("Data Set: ", experiment_outcome[[data_num]]$name,
+                      "\nEstimator: ", experiment_outcome[[data_num]]$estimates[[estimator_num]]$method,
+                      "\nParams: ", paste(names(experiment_outcome[[data_num]]$estimates[[estimator_num]]$params),
+                                          experiment_outcome[[data_num]]$estimates[[estimator_num]]$params, sep = ":", collapse = ", "))
+    solution_path_plot <- plot_single_solution_path(ic_results_list, experiment_outcome[[data_num]]$limit_cycle_tail, title_str)
     solution_graphs[[i]] <- solution_path_plot
   }
 
@@ -287,7 +290,7 @@ experiment_estimators <- list(truth, spline1, loess)
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
 plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 3), c(data = 2, estimator = 2)))
-plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2), c(data = 1, estimator = 3)))
+plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 2, estimator = 1)))
 to_plot <- list(plot1, plot2)
 visualize_results(experiment_results, to_plot)
 
