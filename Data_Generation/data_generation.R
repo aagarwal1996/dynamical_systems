@@ -41,7 +41,7 @@ smooth_noisy_samples <- function(data, lambda = 1e-1){
   return(data)
 }
 
-spline_smooth_noisy_samples <- function(data, 
+spline_smooth_noisy_samples <- function(orig_data, data, 
                   lambda = 1e-10, norder = 4, nbasis = 12, penalty_order = 2, max_t = 1){
 
   time_grid <- seq(0,max_t,length.out=nrow(data))
@@ -68,7 +68,8 @@ spline_smooth_noisy_samples <- function(data,
   tps_x <- Tps(time_grid, data$x)$fitted.values
   tps_y <- Tps(time_grid, data$y)$fitted.values
   
-  plotting_df <- rbind(tibble(x = data$x, y = data$y, label = "Truth"),
+  plotting_df <- rbind(tibble(x = orig_data$x, y = orig_data$y, label = "Truth"),
+                       tibble(x = data$x, y = data$y, label = "Noisy Samples"),
                        tibble(x = spline_grid_x, y = spline_grid_y, label = "b-Spline"),
                        tibble(x = tps_x, y = tps_y, label = "TPS with GCV"))
   j <- ggplot(plotting_df, aes(x=x, y=y)) +
@@ -78,6 +79,7 @@ spline_smooth_noisy_samples <- function(data,
   
   smooth_spline_data <- matrix(c(tps_x,tps_y), ncol = 2)
   smooth_spline_sample <- smooth_spline_data[sample(nrow(data),size=nrow(data)/2,replace=FALSE),]
+  
   return(smooth_spline_sample)
 }
 
@@ -280,7 +282,7 @@ generate_loess_path <- function(data, estimator, initial_condition, num_samples 
 
 ## b-splines
 
-generate_spline_path <- function(estimator, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_spline_path <- function(estimator, initial_condition, num_samples = 3000, sample_density = 0.1){
   initial_condition <- unlist(initial_condition)
   
   # compute the prediction and its gradient at each sample
@@ -369,7 +371,7 @@ get_gradient_field <- function(data, estimator){
       spline_fit <- calculate_spline_gradient_field(data$limit_cycle_tail,
                  grid$x_grid, grid$y_grid, lambda = estimator$params$lambda)
       sfd_list <- list(fdx = spline_fit$fdx, fdy = spline_fit$fdy)
-      return_list <- list(field = spline_fit$field, sfd_list = sfd_list)
+      return_list <- list(field = spline_fit$field, sfd_list = sfd_list, params = estimator$params)
       return(return_list)
   }
   else if (estimator$method == "truth"){
@@ -383,13 +385,18 @@ get_gradient_field <- function(data, estimator){
     evaluated_field <- NW_regression_cpp(grid$eval_grid, as.matrix(data$limit_cycle_tail), nw_bw_matrix)
   }
   else if (estimator$method == "loess"){
+    if (estimator$params$h == "gcv"){
+      bw_grid <- seq(0.05, 2, length.out = 10) # TODO: Allow user to specify
+      estimator$params$h <- loess_bw_cv(grid$eval_grid, as.matrix(data$limit_cycle_tail), bw_grid)
+    }
     evaluated_field <- eval_loess_fit(grid$eval_grid, as.matrix(data$limit_cycle_tail), estimator$params$h)
   }
   else {
     evaluated_field <- NA
   }
 
-  return(evaluated_field)
+  return_list = list(evaluated_field = evaluated_field, params = estimator$params)
+  return(return_list)
 }
 
 generate_solution_path <- function(data, estimator, initial_condition){

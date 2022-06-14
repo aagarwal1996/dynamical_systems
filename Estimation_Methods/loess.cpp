@@ -46,7 +46,7 @@ rowvec get_loess_pred(rowvec query_point, mat data, double bw){
   mat data_coord = data.cols(data_coord_index);
   mat data_grad = data.cols(data_grad_index);
   
-  mat bw_matrix = mat(2,2,fill::eye) * bw; // TODO: adjust size automatically
+  mat bw_matrix = mat(2,2,fill::eye) * bw;
   vec gauss_kernel_weights = dmvnrm_arma(data_coord, query_point, bw_matrix);
   vec normalized_weights = gauss_kernel_weights/sum(gauss_kernel_weights);
   mat weight_matrix = mat(data.n_rows,data.n_rows,fill::eye).each_col() % normalized_weights;
@@ -68,4 +68,11 @@ mat eval_loess_fit(mat eval_coords, mat data, double bw){
     
   }
   return(estimated_f);
+}
+
+// [[Rcpp::export(loess_bw_cv)]]
+double loess_bw_cv(mat grid, mat data, vec bw_grid){
+  double min_bw;
+  min_bw = 0.5;
+  return(min_bw);
 }
