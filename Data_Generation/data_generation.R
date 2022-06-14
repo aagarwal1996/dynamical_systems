@@ -2,7 +2,104 @@
 ## Data Generation
 ##
 
-# TODO: Add observation noise
+smooth_noisy_samples <- function(data, lambda = 1e-1){
+  # init grid to fit spline over
+  sample_x_min <- min(data$x)
+  sample_x_max <- max(data$x)
+  x_grid <- sort(unique(data$x)) #seq(sample_x_min,sample_x_max,length.out=20)
+  sample_y_min <- min(data$y)
+  sample_y_max <- max(data$y)
+  y_grid <- sort(unique(data$y)) #seq(sample_y_min,sample_y_max,length.out=20)
+  
+  bspline_basis_fns <- generate_bspline_basis(data, x_grid, y_grid, norder = 4, 
+                                              nbasis = 12, penalty_order = 2)
+  
+  bspline_fit_coeffs <- fit_bsplines_cpp(bspline_basis_fns$xbasis.eval, bspline_basis_fns$ybasis.eval,
+                                         bspline_basis_fns$xpenalty, bspline_basis_fns$ypenalty,
+                                         data$x, data$y, lambda)
+  
+  # create bivariate functional data objects for our fit splines 
+  spline.fd_x <- bifd(t(matrix(bspline_fit_coeffs[,1],12,12)), 
+                      bspline_basis_fns$xbasis,  bspline_basis_fns$ybasis)
+  spline.fd_y <- bifd(t(matrix(bspline_fit_coeffs[,2],12,12)),
+                      bspline_basis_fns$xbasis,  bspline_basis_fns$ybasis)
+  
+  spline_grid_x <- eval.bifd(x_grid,y_grid,spline.fd_x)
+  spline_grid_y <- eval.bifd(x_grid,y_grid,spline.fd_y)
+  
+  #View(list(fdx = spline.fd_x, fdy = spline.fd_y, 
+  #          truth1 = x_grid, truth2 = y_grid,
+  #          test1 = spline_grid_x, test2 = spline_grid_y))
+  
+  plotting_df <- rbind(tibble(x = data$x, y = data$y, label = "Truth"),
+                       tibble(x = spline_grid_x, y = spline_grid_y, label = "Smoothed"))
+  j <- ggplot(plotting_df, aes(x=x, y=y)) +
+    geom_point() +
+    facet_wrap(~label)
+  print(j)
+  
+  return(data)
+}
+
+spline_smooth_noisy_samples <- function(data, 
+                  lambda = 1e-10, norder = 4, nbasis = 12, penalty_order = 2, max_t = 1){
+
+  time_grid <- seq(0,max_t,length.out=nrow(data))
+  
+  xbasis = create.bspline.basis(rangeval=c(min(time_grid),max(time_grid)),norder=norder,nbasis=nbasis)
+  ybasis = create.bspline.basis(rangeval=c(min(time_grid),max(time_grid)),norder=norder,nbasis=nbasis)
+  xbasis.vals = eval.basis(time_grid,xbasis)
+  ybasis.vals = eval.basis(time_grid,ybasis)
+  
+  # get roughness penalty for each axis
+  xPen = eval.penalty(xbasis, penalty_order)
+  yPen = eval.penalty(ybasis, penalty_order)
+  
+  bspline_fit_coeffs <- fit_bsplines_cpp(xbasis.vals, ybasis.vals, xPen, yPen, data$x, data$y, lambda)
+  
+  spline.fd_x <- bifd(t(matrix(bspline_fit_coeffs[,1],nbasis,nbasis)), 
+                       xbasis, ybasis)
+  spline.fd_y <- bifd(t(matrix(bspline_fit_coeffs[,2],nbasis,nbasis)),
+                      xbasis, ybasis)
+  
+  spline_grid_x <- eval.bifd(time_grid,time_grid,spline.fd_x)
+  spline_grid_y <- eval.bifd(time_grid,time_grid,spline.fd_y)
+  
+  tps_x <- Tps(time_grid, data$x)$fitted.values
+  tps_y <- Tps(time_grid, data$y)$fitted.values
+  
+  plotting_df <- rbind(tibble(x = data$x, y = data$y, label = "Truth"),
+                       tibble(x = spline_grid_x, y = spline_grid_y, label = "b-Spline"),
+                       tibble(x = tps_x, y = tps_y, label = "TPS with GCV"))
+  j <- ggplot(plotting_df, aes(x=x, y=y)) +
+    geom_point() +
+    facet_wrap(~label)
+  print(j)
+  
+  smooth_spline_data <- matrix(c(tps_x,tps_y), ncol = 2)
+  smooth_spline_sample <- smooth_spline_data[sample(nrow(data),size=nrow(data)/2,replace=FALSE),]
+  return(smooth_spline_sample)
+}
+
+loess_smooth_noisy_samples <- function(data, h = 0.1){
+  rownames(data) <- NULL
+  loess_lc_coords <- as.matrix(data[,c(1,2)])
+  loess_lc_data <- as.matrix(data[,c(1,2,1,2)])[sample(nrow(data),size=500,replace=TRUE),]
+
+  smoothed_lc <- eval_loess_fit(loess_lc_coords,loess_lc_data,h) 
+  
+  plotting_df <- rbind(tibble(x = data$x, y = data$y, label = "Truth"),
+                       tibble(x = smoothed_lc[,1], y = smoothed_lc[,2], label = "Smoothed"))
+  j <- ggplot(plotting_df, aes(x=x, y=y)) +
+    geom_point(alpha = 0.5) +
+    facet_wrap(~label)
+  print(j)
+  
+  #View(loess_lc_data)
+  #View(cbind(loess_lc_coords,smoothed_lc))
+  
+  return(smoothed_lc)
+}
 
 get_abhi_data <- function(){
   # Returns Abhi's simulated data

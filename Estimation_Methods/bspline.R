@@ -19,7 +19,7 @@ calculate_spline_gradient_field <- function(data, x_grid, y_grid, norder = 4, nb
   spline.fd_x <- bifd(t(matrix(bspline_fit_coeffs[,1],12,12)), 
                       bspline_basis_fns$xbasis,  bspline_basis_fns$ybasis)
   spline.fd_y <- bifd(t(matrix(bspline_fit_coeffs[,2],12,12)),
-                      bspline_basis_fns$ xbasis,  bspline_basis_fns$ybasis)
+                      bspline_basis_fns$xbasis,  bspline_basis_fns$ybasis)
   
   # evaluate over user-specified grid
   spline_grid_x <- eval.bifd(x_grid,y_grid,spline.fd_x)

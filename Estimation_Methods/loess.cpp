@@ -67,6 +67,5 @@ mat eval_loess_fit(mat eval_coords, mat data, double bw){
     estimated_f.row(i) = get_loess_pred(eval_coords.row(i), data, bw);
     
   }
-  
   return(estimated_f);
 }

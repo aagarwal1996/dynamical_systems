@@ -9,6 +9,7 @@ library(mvtnorm) # for Multivariate Normal density estimates in KDE
 library(shape) # for pretty arrows
 library(ggquiver) # for vector field plots
 library(ggpubr) # to generate side-by-side plots
+library(fields) # for thin-plate splines
 
 source(here::here('Data_Generation/data_generation.R')) # functions to generate data from specific DS are in another file
 source(here::here('Estimation_Methods/bspline.R'))
@@ -22,7 +23,7 @@ sourceCpp(here::here('Estimation_Methods/loess.cpp'))
 #####################
 
 generate_limit_cycle_data <- function(system, params, var_x, var_y, sample_seed = 2022,
-                                      num_samples = 1500, sample_density = 0.1,
+                                      num_samples = 1500, lc_length = 500, sample_density = 0.1,
                                       use_seed = F, save_csv = F){  
   set.seed(sample_seed)
   
@@ -42,11 +43,19 @@ generate_limit_cycle_data <- function(system, params, var_x, var_y, sample_seed 
     write_csv(sampled_data, file_name)
   }
   
-  # add Gaussian noise to position of observations
-  noise_matrix <- mvrnorm(nrow(sampled_data), c(0,0,0,0), diag(c(var_x,var_y,0,0)))
-  noisy_samples <- sampled_data + noise_matrix
+  # TODO: Update rest of code
+  sampled_data <- tail(sampled_data, lc_length) # truncate to final samples
   
-  return(noisy_samples)
+  if ((var_x != 0) | (var_y != 0)){
+    # add Gaussian noise to position of observations
+    noise_matrix <- mvrnorm(nrow(sampled_data), c(0,0,0,0), diag(c(var_x,var_y,0,0)))
+    noisy_samples <- sampled_data + noise_matrix 
+    smoothed_positions <- spline_smooth_noisy_samples(noisy_samples, lambda = 1e-8, nbasis = 20, max_t = .15)
+    #smoothed_positions <- loess_smooth_noisy_samples(noisy_samples,h=25)
+    sampled_data <- cbind(smoothed_positions, noisy_samples[,c(3,4)])
+  }
+  colnames(sampled_data) <- c("x","y","f_x","f_y")
+  return(sampled_data)
 }
 
 generate_data_object <- function(experiment_list,
@@ -82,7 +91,7 @@ generate_data_object <- function(experiment_list,
                         xmax = max(data_list[[i]]$limit_cycle_tail$x),
                         ymin = min(data_list[[i]]$limit_cycle_tail$y),
                         ymax = max(data_list[[i]]$limit_cycle_tail$y)) 
-    #View(data_list[[i]])
+    
     grid_object$x_grid = seq(floor(grid_object$xmin) - data_list[[i]]$extrapolation_size , ceiling(grid_object$xmax) + data_list[[i]]$extrapolation_size, 
                              len = data_list[[i]]$x_grid_size)
     grid_object$y_grid = seq(floor(grid_object$ymin) - data_list[[i]]$extrapolation_size, ceiling(grid_object$ymax) + data_list[[i]]$extrapolation_size, 
@@ -155,7 +164,8 @@ ggplot_field <- function(ls_samples, eval_grid, gradient_data, title="", rescale
                             u = rescale*gradient_data[,1], v =rescale*gradient_data[,2])
   
   field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
-    geom_quiver(color = "#003262", vecsize = 0) +
+    #geom_quiver(color = "#003262", vecsize = 0) +
+    geom_quiver(color = "#003262") +
     geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
     labs(title = title)
   
@@ -268,10 +278,10 @@ visualize_results <- function(experiment_outcome, plot_list){
 #############
 
 # specify data
-no_noise <- list(name = "test", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 0,
-                 lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
-some_noise <- list(name = "noisy_y", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 1, var_y = 1,
-                   lc_tail_n = 700, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
+no_noise <- list(name = "low stiff", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 0, var_y = 0,
+                 lc_tail_n = 500, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
+some_noise <- list(name = "noisy low stiff", system = "van_der_pol", params = list(mu = 1.5), n = 1000, sample_density = 0.1, var_x = 0.05, var_y = 0.05,
+                   lc_tail_n = 500, x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5)
 experiment_list <- list(no_noise, some_noise)
 experiment_data <- generate_data_object(experiment_list)
 
@@ -283,14 +293,28 @@ nw_base <- list(method = "nw",  params = list(h = 0.01))
 loess <- list(method = "loess",  params = list(h = 0.1))
 spline1 <- list(method = "spline",  params = list(lambda = 1e-16))
 spline2 <- list(method = "spline",  params = list(lambda = 1e-8))
-spline3 <- list(method = "spline",  params = list(lambda = 1))
+spline3 <- list(method = "spline",  params = list(lambda = 1e-4))
+spline4 <- list(method = "spline",  params = list(lambda = 1e-2))
+
 # pick estimators to run on each data set
-experiment_estimators <- list(truth, spline1, loess)
+experiment_estimators <- list(truth, one_nn, spline1, spline2, spline3, spline4)
 
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
-plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 3), c(data = 2, estimator = 2)))
-plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 2, estimator = 1)))
-to_plot <- list(plot1, plot2)
+plot1 <- list(type = "field", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
+plot2 <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2)))
+
+plot3 <- list(type = "field", experiments = list(c(data = 2, estimator = 1), 
+                                                 c(data = 2, estimator = 2),
+                                                 c(data = 2, estimator = 3),
+                                                 c(data = 2, estimator = 4),
+                                                 c(data = 2, estimator = 5),
+                                                 c(data = 2, estimator = 6)
+                                                 ))
+plot4 <- list(type = "solution_path", experiments = list(c(data = 2, estimator = 1), 
+                                                 c(data = 2, estimator = 3)
+                                                 ))
+
+to_plot <- list(plot3)
 visualize_results(experiment_results, to_plot)
 
