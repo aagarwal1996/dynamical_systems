@@ -156,17 +156,17 @@ run_gd <- function(gd_data, eig_rank, basis_list, prior_results, batch_params, e
       
       for (i in 1:length(x_coefs)){
         estimated_sample_gradient_x_dc <- c(x_y_matrix[i], 0)
-        dP_dc_x = (1/gradient_norm) * ( outer(estimated_sample_gradient_x_dc, estimated_sample_gradient) +
+        dP_dc_x = (1/gradient_norm^2) * ( outer(estimated_sample_gradient_x_dc, estimated_sample_gradient) +
                                         outer(estimated_sample_gradient, estimated_sample_gradient_x_dc) -
-                                        (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_x_dc)/gradient_norm^2 ) * 
+                                        2*(as.vector(estimated_sample_gradient %*% estimated_sample_gradient_x_dc)/gradient_norm^4 ) * 
                                         outer(estimated_sample_gradient,estimated_sample_gradient))
         projection_partial_list_x[[i]] <- dP_dc_x
         
         # again assuming same bivariate basis for fdx and fdy
         estimated_sample_gradient_y_dc <- c(0, x_y_matrix[i])
-        dP_dc_y = (1/gradient_norm) * ( outer(estimated_sample_gradient_y_dc, estimated_sample_gradient) +
+        dP_dc_y = (1/gradient_norm^2) * ( outer(estimated_sample_gradient_y_dc, estimated_sample_gradient) +
                                           outer(estimated_sample_gradient, estimated_sample_gradient_y_dc) -
-                                          (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_y_dc)/gradient_norm^2) *
+                                          2*(as.vector(estimated_sample_gradient %*% estimated_sample_gradient_y_dc)/gradient_norm^4) *
                                           outer(estimated_sample_gradient, estimated_sample_gradient))
         projection_partial_list_y[[i]] <- dP_dc_y
       }
@@ -186,7 +186,164 @@ run_gd <- function(gd_data, eig_rank, basis_list, prior_results, batch_params, e
       # coefficient update step may be complex
       fdx_updates[,batch_index] <- Re(dL_dC_x)
       fdy_updates[,batch_index] <- Re(dL_dC_y)
-    } else {stop("Invalid SGD algorithm")}
+    } else if (algorithm == "Projection_Bug"){
+      # IMPORTANT: for now we project off estimated gradient, not observed
+      true_sample_gradient <- gd_data[sample_index, c(3,4)]
+      estimated_sample_gradient <- c(init_fit_fx[sample_index,sample_index],init_fit_fy[sample_index,sample_index])
+      # TODO: check discrepancy is tolerable at initialization
+      
+      gradient_norm <- norm(estimated_sample_gradient, type="2")
+      projection_matrix <- outer(estimated_sample_gradient,estimated_sample_gradient) / gradient_norm
+      jacobian_residuals <- (diag(2) -  projection_matrix) %*% jacobian
+      jacobian_residuals_eigen <- eigen(jacobian_residuals)
+      jacobian_residuals_eig_order <- order(Re(jacobian_residuals_eigen$values),decreasing=T)
+      jacobian_residuals_eig_ordered_values = jacobian_residuals_eigen$values[jacobian_residuals_eig_order]
+      jacobian_residuals_eig_ordered_vectors = jacobian_residuals_eigen$vectors[,jacobian_residuals_eig_order]
+      
+      # makes more sense to skip negative eigenvalues in the projeciton sense
+      if (batch_params$skip_negative){
+        if (Re(jacobian_residuals_eig_ordered_values[1]) < 0){
+          current_run <- current_run + 1
+          if (current_run > nrow(gd_data)){ break }
+          next  
+        }
+      }
+      
+      # the hermitian transpose is required for Thm. 2 of Magnus (1985)
+      jacobian_residuals_conjugate <- Conj(t(jacobian_residuals))
+      jacobian_residuals_conjugate_eigen <- eigen(jacobian_residuals_conjugate)
+      jacobian_residuals_conjugate_eig_order <- order(Re(jacobian_residuals_conjugate_eigen$values),decreasing=T)
+      jacobian_residuals_conjugate_eig_ordered_values = jacobian_residuals_conjugate_eigen$values[jacobian_residuals_conjugate_eig_order]
+      jacobian_residuals_conjugate_eig_ordered_vectors = jacobian_residuals_conjugate_eigen$vectors[,jacobian_residuals_conjugate_eig_order]
+      
+      
+      # these lists will contain the matrix of partial derivatives wrt each spline coefficient per direction
+      jacobian_partial_list_x <- list()
+      projection_partial_list_x <- list()
+      jacobian_partial_list_y <- list()
+      projection_partial_list_y <- list()
+      
+      # get partials of eigen vectors wrt Jacobian
+      for (i in 1:length(x_coefs)){
+        dJ_dc_x = matrix(c(dx_y_vec[i],0,x_dy_vec[i],0),2,2)
+        jacobian_partial_list_x[[i]] <- dJ_dc_x
+        # again assuming same bivariate basis for fdx and fdy
+        dJ_dc_y = matrix(c(0,dx_y_vec[i],0,x_dy_vec[i]),2,2)
+        jacobian_partial_list_y[[i]] <- dJ_dc_y
+      }
+      
+      for (i in 1:length(x_coefs)){
+        estimated_sample_gradient_x_dc <- c(x_y_matrix[i], 0)
+        dP_dc_x = (1/gradient_norm) * ( outer(estimated_sample_gradient_x_dc, estimated_sample_gradient) +
+                                            outer(estimated_sample_gradient, estimated_sample_gradient_x_dc) -
+                                            (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_x_dc)/gradient_norm^2 ) * 
+                                            outer(estimated_sample_gradient,estimated_sample_gradient))
+        projection_partial_list_x[[i]] <- dP_dc_x
+        
+        # again assuming same bivariate basis for fdx and fdy
+        estimated_sample_gradient_y_dc <- c(0, x_y_matrix[i])
+        dP_dc_y = (1/gradient_norm) * ( outer(estimated_sample_gradient_y_dc, estimated_sample_gradient) +
+                                            outer(estimated_sample_gradient, estimated_sample_gradient_y_dc) -
+                                            (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_y_dc)/gradient_norm^2) *
+                                            outer(estimated_sample_gradient, estimated_sample_gradient))
+        projection_partial_list_y[[i]] <- dP_dc_y
+      }
+      
+      dPJ_dC_x <- Map(function(x,y) x %*% jacobian + projection_matrix %*% y, projection_partial_list_x, jacobian_partial_list_x)
+      dPJ_dC_y <- Map(function(x,y) x %*% jacobian + projection_matrix %*% y, projection_partial_list_y, jacobian_partial_list_y)
+      
+      dMJ_dC_x <- Map(function(x,y) x - y, jacobian_partial_list_x, dPJ_dC_x)
+      dMJ_dC_y <- Map(function(x,y) x - y, jacobian_partial_list_y, dPJ_dC_y)
+      
+      # apply formula of partial eigenvalue wrt coefficients
+      w_0 <- jacobian_residuals_conjugate_eig_ordered_vectors[,eig_rank]
+      v_0 <- jacobian_residuals_eig_ordered_vectors[,eig_rank]
+      dL_dC_x <-unlist(Map(function(x) (1/sqrt(w_0%*%v_0) * (t(w_0) %*% x %*% v_0) ),dMJ_dC_x))
+      dL_dC_y <- unlist(Map(function(x) (1/sqrt(w_0%*%v_0) * (t(w_0) %*% x %*% v_0) ),dMJ_dC_y))
+      
+      # coefficient update step may be complex
+      fdx_updates[,batch_index] <- Re(dL_dC_x)
+      fdy_updates[,batch_index] <- Re(dL_dC_y)
+    } else if (algorithm == "Projection_Motion"){
+      # IMPORTANT: for now we project off estimated gradient, not observed
+      true_sample_gradient <- gd_data[sample_index, c(3,4)]
+      estimated_sample_gradient <- c(init_fit_fx[sample_index,sample_index],init_fit_fy[sample_index,sample_index])
+      # TODO: check discrepancy is tolerable at initialization
+      
+      gradient_norm <- norm(estimated_sample_gradient, type="2")
+      projection_matrix <- outer(estimated_sample_gradient,estimated_sample_gradient) / gradient_norm
+      jacobian_residuals <- (diag(2) -  projection_matrix) %*% jacobian
+      jacobian_residuals_eigen <- eigen(jacobian_residuals)
+      jacobian_residuals_eig_order <- order(Re(jacobian_residuals_eigen$values),decreasing=T)
+      jacobian_residuals_eig_ordered_values = jacobian_residuals_eigen$values[jacobian_residuals_eig_order]
+      jacobian_residuals_eig_ordered_vectors = jacobian_residuals_eigen$vectors[,jacobian_residuals_eig_order]
+      
+      # makes more sense to skip negative eigenvalues in the projeciton sense
+      if (batch_params$skip_negative){
+        if (Re(jacobian_residuals_eig_ordered_values[1]) < 0){
+          current_run <- current_run + 1
+          if (current_run > nrow(gd_data)){ break }
+          next  
+        }
+      }
+      
+      # the hermitian transpose is required for Thm. 2 of Magnus (1985)
+      jacobian_residuals_conjugate <- Conj(t(jacobian_residuals))
+      jacobian_residuals_conjugate_eigen <- eigen(jacobian_residuals_conjugate)
+      jacobian_residuals_conjugate_eig_order <- order(Re(jacobian_residuals_conjugate_eigen$values),decreasing=T)
+      jacobian_residuals_conjugate_eig_ordered_values = jacobian_residuals_conjugate_eigen$values[jacobian_residuals_conjugate_eig_order]
+      jacobian_residuals_conjugate_eig_ordered_vectors = jacobian_residuals_conjugate_eigen$vectors[,jacobian_residuals_conjugate_eig_order]
+      
+      
+      # these lists will contain the matrix of partial derivatives wrt each spline coefficient per direction
+      jacobian_partial_list_x <- list()
+      projection_partial_list_x <- list()
+      jacobian_partial_list_y <- list()
+      projection_partial_list_y <- list()
+      
+      # get partials of eigen vectors wrt Jacobian
+      for (i in 1:length(x_coefs)){
+        dJ_dc_x = matrix(c(dx_y_vec[i],0,x_dy_vec[i],0),2,2)
+        jacobian_partial_list_x[[i]] <- dJ_dc_x
+        # again assuming same bivariate basis for fdx and fdy
+        dJ_dc_y = matrix(c(0,dx_y_vec[i],0,x_dy_vec[i]),2,2)
+        jacobian_partial_list_y[[i]] <- dJ_dc_y
+      }
+      
+      for (i in 1:length(x_coefs)){
+        estimated_sample_gradient_x_dc <- c(x_y_matrix[i], 0)
+        dP_dc_x = (1/gradient_norm) * ( outer(estimated_sample_gradient_x_dc, estimated_sample_gradient) +
+                                          outer(estimated_sample_gradient, estimated_sample_gradient_x_dc) -
+                                          (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_x_dc)/gradient_norm^2 ) * 
+                                          outer(estimated_sample_gradient,estimated_sample_gradient))
+        projection_partial_list_x[[i]] <- dP_dc_x
+        
+        # again assuming same bivariate basis for fdx and fdy
+        estimated_sample_gradient_y_dc <- c(0, x_y_matrix[i])
+        dP_dc_y = (1/gradient_norm) * ( outer(estimated_sample_gradient_y_dc, estimated_sample_gradient) +
+                                          outer(estimated_sample_gradient, estimated_sample_gradient_y_dc) -
+                                          (as.vector(estimated_sample_gradient %*% estimated_sample_gradient_y_dc)/gradient_norm^2) *
+                                          outer(estimated_sample_gradient, estimated_sample_gradient))
+        projection_partial_list_y[[i]] <- dP_dc_y
+      }
+      
+      dPJ_dC_x <- Map(function(x,y) x %*% jacobian + projection_matrix %*% y, projection_partial_list_x, jacobian_partial_list_x)
+      dPJ_dC_y <- Map(function(x,y) x %*% jacobian + projection_matrix %*% y, projection_partial_list_y, jacobian_partial_list_y)
+      
+      #dMJ_dC_x <- Map(function(x,y) x - y, jacobian_partial_list_x, dPJ_dC_x)
+      #dMJ_dC_y <- Map(function(x,y) x - y, jacobian_partial_list_y, dPJ_dC_y)
+      
+      # apply formula of partial eigenvalue wrt coefficients
+      w_0 <- jacobian_residuals_conjugate_eig_ordered_vectors[,eig_rank]
+      v_0 <- jacobian_residuals_eig_ordered_vectors[,eig_rank]
+      dL_dC_x <-unlist(Map(function(x) (1/sqrt(w_0%*%v_0) * (t(w_0) %*% x %*% v_0) ),dPJ_dC_x))
+      dL_dC_y <- unlist(Map(function(x) (1/sqrt(w_0%*%v_0) * (t(w_0) %*% x %*% v_0) ),dPJ_dC_y))
+      
+      # coefficient update step may be complex
+      fdx_updates[,batch_index] <- Re(dL_dC_x)
+      fdy_updates[,batch_index] <- Re(dL_dC_y)
+    }
+    else {stop("Invalid SGD algorithm")}
     
     eigen_results <- c(eigen_results, jacobian_eig_odered_values)
     sampled_indices <- c(sampled_indices, sample_index)
@@ -213,6 +370,7 @@ analyze_gd_convergence <- function(gd_points, batch_params, results, grid_list, 
   # Code to get eigen values at points we optimized WRT to. Not used
   batch_indices <- unlist(lapply(results_list$eigs,function(x){as.numeric(unique(names(x)))}))
   sampled_points <- gd_points[batch_indices,]
+  if (nrow(sampled_points)!=batch_params$num_iterations*batch_params$batches_per*batch_params$batch_size){return()}
   # num_iterations=10,batches_per=50,batch_size
   sampled_points$iteration <- rep(1:batch_params$num_iterations, each = batch_params$batches_per*batch_params$batch_size)
   sampled_points$batch <- rep(rep(1:batch_params$batches_per,each=batch_params$batch_size),batch_params$num_iterations)

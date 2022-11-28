@@ -285,6 +285,48 @@ lv_gradient_helper <- function(v, params){
   return(matrix(c(dx,dy), nrow = 1))
 }
 
+generate_log_lv <- function(params, num_samples = 1500, sample_density = 0.1){
+  # randomly pick the IC
+  initial_condition <- runif(2, min = 5, max = 10)
+  names(initial_condition) <- c('x','y')
+  
+  # compute the prediction and its gradient at each sample
+  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), 
+                           eval_log_lv_gradient, params))
+  derivative_evals <- t(apply(traj[,2:3], 1, eval_log_lv_gradient, t = 0, params = params, list = T))
+  traj['f_x'] <- derivative_evals[,1] # TODO: is there a way to get the gradient with `lsoda` as opposed to manually?
+  traj['f_y'] <- derivative_evals[,2]
+  
+  return(traj[,-1])
+  
+}
+
+eval_log_lv_gradient <- function(t, v, params, list = F){
+  # helper function to evaluate gradient of van der pol at point v = (x,y)
+  x <- v[1]
+  y <- v[2]
+  
+  d_x <- params$alpha - params$beta*exp(y)
+  d_y <- params$delta*exp(x) - params$gamma
+  
+  
+  
+  # different return format if used in `lsoda` or not
+  if(list){return(c(d_x,d_y))}
+  return(list(as.vector(c(d_x,d_y))))
+}
+
+log_lv_gradient_helper <- function(v, params){
+  # redcued form not for lsoa
+  x <- v[1]
+  y <- v[2]
+  
+  d_x <- params$alpha - params$beta*exp(y)
+  d_y <- params$delta*exp(x) - params$gamma
+  
+  # different return format if used in `lsoda` or not
+  return(matrix(c(d_x,d_y), nrow = 1))
+}
 
 generate_gause <- function(system_params, num_samples = 1500, sample_density = 0.1){
   a <- system_params$a # saturation point
@@ -295,7 +337,7 @@ generate_gause <- function(system_params, num_samples = 1500, sample_density = 0
   
   # system only defined in Q1
   # randomly pick the IC in [0, 10] x [0, 10]
-  initial_condition <- runif(2, min = 0, max = 2)
+  initial_condition <- runif(2, min = 3, max = 7)
   names(initial_condition) <- c('x','y')
   
   # compute the prediction and its gradient at each sample
@@ -316,7 +358,7 @@ eval_gause_gradient <- function(t, v, params, list = F){
   f_x <- params$r * (1 - x/params$K)
   phi <- params$a / (params$b + x)
   
-  dx <- x*f_x - y*phi
+  dx <- x*f_x - y*phi*x
   dy <- y*(-params$c + params$k*x*phi)
 
   # different return format if used in `lsoda` or not
@@ -333,7 +375,7 @@ gause_gradient_helper <- function(v, params){
   f_x <- params$r * (1 - x/params$K)
   phi <- params$a / (params$b + x)
   
-  dx <- x*f_x - y*phi
+  dx <- x*f_x - y*phi*x
   dy <- y*(-params$c + params$k*x*phi)
   
   # different return format if used in `lsoda` or not
@@ -453,6 +495,13 @@ generate_true_path_lv <- function(data, params, initial_condition, num_samples =
   
 }
 
+generate_true_path_log_lv <- function(data, params, initial_condition, num_samples = 500, sample_density = 0.1){
+  initial_condition <- unlist(initial_condition)
+  # compute the prediction and its gradient at each sample
+  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_log_lv_gradient, params))
+  return(traj[,-1])
+  
+}
 
 ## Nadaraya Watson
 
@@ -582,6 +631,9 @@ generate_true_grid_data <- function(model, params, eval_grid){
   }
   else if(model == "lotka_volterra"){
     grid_gradient <- t(apply(eval_grid, 1, lv_gradient_helper, params = params))
+  }  
+  else if(model == "log_lotka_volterra"){
+    grid_gradient <- t(apply(eval_grid, 1, log_lv_gradient_helper, params = params))
   }
   else if(model == "var_circle"){
     grid_gradient <- t(apply(eval_grid, 1, eval_var_speed_circle, t = 0, params = NA, matrix = T))
@@ -653,6 +705,9 @@ generate_solution_path <- function(data, estimator, initial_condition){
     }
     else if (estimator$params$name == "lotka_volterra") {
       evaluated_field <- generate_true_path_lv(data, estimator$params, initial_condition) 
+    }
+    else if (estimator$params$name == "log_lotka_volterra") {
+      evaluated_field <- generate_true_path_log_lv(data, estimator$params, initial_condition) 
     }
     else if (estimator$params$name == "gause") {
       evaluated_field <- generate_true_path_gause(data, estimator$params, initial_condition)

@@ -318,7 +318,7 @@ get_dP_fixed_dJ <- function(i, j, P, J, X, eig_val, projection_rank){
       dP_fixed_dX <- matrix(c(0,0,2*X[1,2],0),ncol=2) 
     }
   } else if (i != j){
-    if(projection_rank == 1){
+    if(projection_rank ==  1){
       dP_fixed_dX <- matrix(c(X[2,1],X[1,1],0,0),ncol=2) 
     } else {
       dP_fixed_dX <- matrix(c(0,0,X[2,2],X[1,2]),ncol=2) 

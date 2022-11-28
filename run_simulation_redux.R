@@ -38,6 +38,9 @@ generate_limit_cycle_data <- function(system, params, var_x, var_y, data_seed = 
   else if(system == "lotka_volterra"){
     sampled_data <- generate_lv(params, num_samples=num_samples,sample_density=sample_density)
   }
+  else if(system == "log_lotka_volterra"){
+    sampled_data <- generate_log_lv(params, num_samples=num_samples,sample_density=sample_density)
+  }
   else if(system == "abhi"){
     sampled_data <- get_abhi_data()
   }
@@ -88,6 +91,7 @@ generate_data_object <- function(experiment_list, noisy_smooth_basis = 48, save_
     smoother <- data_list[[i]]$smoother
     data_seed <- data_list[[i]]$data_seed
     noise_seed <- data_list[[i]]$noise_seed
+    lc_length <- data_list[[i]]$lc_length
     
     # generate data
     data_list[[i]]$limit_cycle_samples <- generate_limit_cycle_data(system_name, system_params, 
@@ -216,31 +220,24 @@ evaluate_gradient_methods <- function(data_list, estimator_list){
 ## Visualization ##
 ###################
 
-ggplot_field <- function(ls_samples, eval_grid, gradient_data, title="", rescale = 0.005){
+ggplot_field <- function(ls_samples, eval_grid, gradient_data, title="", rescale = 1, sample_alpha=1){
   # plot a gradient field with limit cycle samples overlayed
   
   sample_tibble <- tibble(x = ls_samples[,1], y = ls_samples[,2], u = NA, v = NA)
   gradient_tibble <- tibble(x = eval_grid[,1], y = eval_grid[,2], 
                             u = rescale*gradient_data[,1], v =rescale*gradient_data[,2])
   field_plot <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
-    #geom_quiver(color = "#003262", vecsize = 0) +
-    geom_quiver(color = "#003262") +
-    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
-    labs(title = title)
+    geom_quiver(color = "#003262",vecsize=rescale) +
+    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515", alpha = sample_alpha) +
+    labs(title = title) + 
+    xlim(min(gradient_tibble$x)-.5, max(gradient_tibble$x)+.5) + #TODO: Make proportional
+    ylim(min(gradient_tibble$y)-.5, max(gradient_tibble$y)+.5)
   
-  gradient_tibble_x <- gradient_tibble %>% mutate(v = 0)
-  gradient_tibble_y <- gradient_tibble %>% mutate(u = 0)
-  field_plot2 <- ggplot(gradient_tibble, aes(x = x, y = y, u = u, v = v)) +
-    geom_quiver(aes(x = x, y = y, u = u, v = 0),color = "#003262") +
-    geom_quiver(aes(x = x, y = y, u = 0, v = v),color = "#003262") +
-    geom_point(data = sample_tibble, aes(x = x, y = y), color = "#FDB515") +
-    labs(title = title)
-  #print(field_plot2)  
   return(field_plot)
 }
 
 plot_estimated_fields <- function(plot_specifications, experiment_outcome){
-  n_col = min(3, length(plot_specifications))
+  n_col = min(2, length(plot_specifications))
   plot_list <- list()
   for (i in 1:length(plot_specifications)){
     data_num <- plot_specifications[[i]][1]
@@ -250,6 +247,62 @@ plot_estimated_fields <- function(plot_specifications, experiment_outcome){
   
   field_plots <- cowplot::plot_grid(plotlist = plot_list, ncol = n_col)
   print(field_plots)
+}
+
+plot_field_delta <- function(plot_specifications, experiment_outcome, sol_paths = F){
+  plot_list <- list()
+  if (sol_paths){
+    solution_graphs <- list()
+    # get shared ICs based on limit cycle data from first experiment
+    shared_ic <- get_shared_ic(experiment_outcome[[1]]$limit_cycle_tail)
+    
+    for (i in 1:length(plot_specifications)){
+      data_num <- plot_specifications[[i]][1]
+      estimator_num <- plot_specifications[[i]][2]
+      
+      ic_results_list <- list()
+      
+      for (j in 1:nrow(shared_ic)){
+        ic_results_list[[j]] <- generate_solution_path(experiment_outcome[[data_num]]$limit_cycle_tail,
+                                                       experiment_outcome[[data_num]]$estimates[[estimator_num]], 
+                                                       shared_ic[j,])
+      }
+      names(ic_results_list) <- rownames(shared_ic)
+      title_str = paste("Data Set: ", experiment_outcome[[data_num]]$name,
+                        "\nEstimator: ", experiment_outcome[[data_num]]$estimates[[estimator_num]]$method,
+                        "\nParams: ", paste(names(experiment_outcome[[data_num]]$estimates[[estimator_num]]$params),
+                                            experiment_outcome[[data_num]]$estimates[[estimator_num]]$params, sep = ":", collapse = "\n"))
+      gradient_list <- list(estimated_field = experiment_outcome[[data_num]]$estimates[[estimator_num]]$estimated_field,
+                            eval_grid = experiment_outcome[[data_num]]$grid$eval_grid)
+      
+      solution_path_plot <- plot_single_solution_path(ic_results_list, gradient_list, experiment_outcome[[data_num]]$limit_cycle_tail, title_str) + 
+        theme(text = element_text(size = 4))
+      
+      solution_graphs[[i]] <- solution_path_plot
+    }
+  }
+  
+  for (i in 1:length(plot_specifications)){
+    data_num <- plot_specifications[[i]][1]
+    estimator_num <- plot_specifications[[i]][2]
+    ref_num <- plot_specifications[[i]][3]
+    ls_samples <- experiment_outcome[[data_num]]$limit_cycle_samples
+    eval_grid <- experiment_outcome[[data_num]]$grid$eval_grid
+    reference_data <- experiment_outcome[[data_num]]$estimates[[ref_num]]$estimated_field
+    gradient_data <- experiment_outcome[[data_num]]$estimates[[estimator_num]]$estimated_field
+    delta_grad <- gradient_data - reference_data
+    if (sol_paths){
+      plot_list[[(2*i - 1)]] <- solution_graphs[[i]]
+    } else{ plot_list[[(2*i - 1)]] <- ggplot_field(ls_samples, eval_grid, reference_data, title="Reference", rescale = 1)} # truth
+    
+    title_str = paste("Alg: ",experiment_outcome[[data_num]]$estimates[[estimator_num]]$params$gd_params$algorithm," Skip:",
+                      experiment_outcome[[data_num]]$estimates[[estimator_num]]$params$gd_params$batching$skip_negative)
+    plot_list[[(2*i)]] <- ggplot_field(ls_samples, eval_grid, delta_grad, title=title_str, rescale = 50, sample_alpha = 0.05) # delta
+  }
+  
+  n_col = length(plot_specifications)
+  delta_plots <- cowplot::plot_grid(plotlist = plot_list, ncol = n_col,byrow=F)
+  print(delta_plots)
 }
 
 get_shared_ic <- function(ls_samples, delta_ring = FALSE){
@@ -333,7 +386,7 @@ plot_solution_paths <- function(plot_specifications, experiment_outcome,
     solution_graphs[[i]] <- solution_path_plot
   }
 
-  n_col = min(3, length(plot_specifications))
+  n_col = min(2, length(plot_specifications))
   sol_plot <- cowplot::plot_grid(plotlist = solution_graphs, ncol = n_col)
   print(sol_plot)
 }
@@ -344,7 +397,11 @@ visualize_results <- function(experiment_outcome, plot_list){
   for (plot in plot_list){
     if (plot$type == "field"){
       plot_estimated_fields(plot$experiments, experiment_outcome)
-    }  
+    }  else if (plot$type == "field_delta"){
+      plot_field_delta(plot$experiments, experiment_outcome)
+    }  else if (plot$type == "field_delta_paths"){
+      plot_field_delta(plot$experiments, experiment_outcome, sol_paths = T)
+    }
     else if (plot$type == "solution_path"){
       plot_solution_paths(plot$experiments, experiment_outcome)
     }
@@ -357,74 +414,140 @@ visualize_results <- function(experiment_outcome, plot_list){
 #############
 ## Testing ##
 #############
+
+## Van der Pol
 truth <- list(method = "truth",  params = list())
 spline <- list(method = "spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20, side_info = list()))
 spline_ring <- list(method = "spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
                   side_info = list(list(name="delta_ring",sample_frac = .2, radius=0.2, shift = 0, si_magnitude = .25,
-                    lc_params = list(system = "van_der_pol", params = list(mu = 1.5))))
+                    lc_params = list(system = "van_der_pol", params = list(mu = 3))))
                  ))
+
+gd_spline_vanilla2_baseline <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                               side_info = list(),
+                                                               gd_params = list(algorithm = "Vanilla", eig_rank = 2,eta=0.02, dt_radius=0, 
+                                                                                batching = list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T))
+))
+
 gd_spline_vanilla <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
                                                             side_info = list(),
-                                                            gd_params = list(algorithm = "Vanilla", eig_rank = 2,eta=0.2, dt_radius=0, 
-                                                            batching = list(num_iterations=5,batches_per=100,batch_size=1,skip_negative=T))
+                                                            gd_params = list(algorithm = "Vanilla", eig_rank = 1,eta=0.02, dt_radius=0, 
+                                                            batching = list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla2 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                               side_info = list(),
+                                                               gd_params = list(algorithm = "Vanilla", eig_rank = 2,eta=0.02, dt_radius=0, 
+                                                                                batching = list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla3 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                               side_info = list(),
+                                                               gd_params = list(algorithm = "Vanilla", eig_rank = 1,eta=0.02, dt_radius=0, 
+                                                                                batching = list(num_iterations=1,batches_per=50,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla4 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                               side_info = list(),
+                                                               gd_params = list(algorithm = "Vanilla", eig_rank = 1,eta=0.02, dt_radius=0, 
+                                                                                batching = list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla_proj <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                               side_info = list(),
+                                                               gd_params = list(algorithm = "Projection", eig_rank = 1,eta=0.02, dt_radius=0.2, 
+                                                                                batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla_proj2 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                    side_info = list(),
+                                                                    gd_params = list(algorithm = "Projection", eig_rank = 2,eta=0.02, dt_radius=0.2, 
+                                                                                     batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla_proj2_bigR <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                     side_info = list(),
+                                                                     gd_params = list(algorithm = "Projection", eig_rank = 2,eta=0.02, dt_radius=0.5, 
+                                                                                      batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla_proj2_NS <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                     side_info = list(),
+                                                                     gd_params = list(algorithm = "Projection", eig_rank = 2,eta=0.02, dt_radius=0.2, 
+                                                                                      batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=F))
+))
+
+gd_spline_vanilla_proj2_bigR_NS <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                          side_info = list(),
+                                                                          gd_params = list(algorithm = "Projection", eig_rank = 2,eta=0.02, dt_radius=0.5, 
+                                                                                           batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=F))
+))
+
+gd_spline_vanilla_motion <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                    side_info = list(),
+                                                                    gd_params = list(algorithm = "Projection_Motion", eig_rank = 1,eta=0.02, dt_radius=0, 
+                                                                                     batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=T))
+))
+
+gd_spline_vanilla_motion_skip <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                                                                    side_info = list(),
+                                                                    gd_params = list(algorithm = "Projection_Motion", eig_rank = 1,eta=0.02, dt_radius=0, 
+                                                                                     batching = list(num_iterations=5,batches_per=300,batch_size=1,skip_negative=F))
 ))
 
 
-gd_spline_projection1 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
-                                                                  side_info = list(),
-                                                                  gd_params = list(algorithm = "Projection", eig_rank = 1,eta=0.01, dt_radius=0,
-                                                                                   batching = list(num_iterations=5,batches_per=100,batch_size=1,skip_negative=T))
-))
-
-gd_spline_projection2 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
-                                                                       side_info = list(),
-                                                                       gd_params = list(algorithm = "Projection", eig_rank = 1,eta=0.02, dt_radius=0,
-                                                                                        batching = list(num_iterations=5,batches_per=100,batch_size=1,skip_negative=T))
-))
-
-gd_spline_projection3 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
-                                                                       side_info = list(),
-                                                                       gd_params = list(algorithm = "Projection", eig_rank = 1,eta=0.05, dt_radius=0,
-                                                                                        batching = list(num_iterations=5,batches_per=100,batch_size=1,skip_negative=T))
-))
-
-gd_spline_projection4 <- list(method = "gd_spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20,
-                                                                       side_info = list(),
-                                                                       gd_params = list(algorithm = "Projection", eig_rank = 1,eta=0.1, dt_radius=0,
-                                                                                        batching = list(num_iterations=5,batches_per=100,batch_size=1,skip_negative=T))
-))
-
-
-some_noise <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5), n = 1000, sample_density = 0.1, var_x = 0.05, var_y = 0.05,
-                    lc_tail_n = 500, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 1, noise_seed = 2)
+some_noise <- list(name = "VDP", system = "van_der_pol", params = list(mu=3), n = 1000, sample_density = 0.1, var_x = 0.05, var_y = 0.05,
+                    lc_tail_n = 500, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 2, noise_seed = 2)
 experiment_list <- list(some_noise)
 experiment_data <- generate_data_object(experiment_list)
-experiment_estimators <- list(truth, spline,gd_spline_projection4)
+experiment_estimators <- list(truth, spline,gd_spline_vanilla,gd_spline_vanilla2,gd_spline_vanilla2_baseline)
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
-plot_alpha <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2),
-                                                              c(data = 1, estimator = 3),  c(data = 1, estimator = 4),
-                                                              c(data = 1, estimator = 5),  c(data = 1, estimator = 6)))
-visualize_results(experiment_results, list(plot_alpha))
+# plot_alpha <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1), c(data = 1, estimator = 2),
+#                                                               c(data = 1, estimator = 3),  c(data = 1, estimator = 4),
+#                                                               c(data = 1, estimator = 5),  c(data = 1, estimator = 6)))
+# visualize_results(experiment_results, list(plot_alpha))
 
+plot_delta <- list(type = "field_delta_paths", experiments = list(c(data = 1, estimator = 1, ref = 1),c(data = 1, estimator = 2, ref = 1),c(data = 1, estimator = 3, ref = 1),c(data = 1, estimator = 4, ref = 1),
+                                                            c(data = 1, estimator = 5, ref = 1)))
+visualize_results(experiment_results, list(plot_delta))
+
+## Lotka-Volterra
 first_lv <- list(name = "LV", system = "lotka_volterra", params = list(alpha=2/3,beta=4/3,delta=1,gamma=1), n = 10000, sample_density = 0.01, var_x = 0.0, var_y = 0.0,
                    lc_tail_n = 10000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 1, noise_seed = 2)
 experiment_list <- list(first_lv)
 experiment_data <- generate_data_object(experiment_list)
-experiment_estimators <- list(truth, spline,gd_spline_projection)
+experiment_estimators <- list(truth, spline,gd_spline_vanilla,gd_spline_vanilla_proj)
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
-plot_lv <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1),c(data = 1, estimator = 2),c(data = 1, estimator = 3)))
+plot_lv <- list(type = "field_delta_paths", experiments = list(c(data = 1, estimator = 1, ref = 1),c(data = 1, estimator = 2, ref = 1),
+                                                               c(data = 1, estimator = 3, ref = 1),c(data = 1, estimator = 4, ref = 1)))
 visualize_results(experiment_results, list(plot_lv))
 
-first_gause <- list(name = "Gause Test", system = "gause", params = list(a = 2.8, b = 0.7, c = 1.35, r = 3.5, k = 1.5, K = 1.4), n = 10000, sample_density = 0.001, var_x = 0.0, var_y = 0.0,
+## Log Lotka-Volterra
+lg_lv <- list(name = "LV", system = "log_lotka_volterra", params = list(alpha=2/3,beta=2/3,delta=1,gamma=1), n = 10000, lc_length = 3000, sample_density = 0.25, var_x = 0.0, var_y = 0.0,
+                 lc_tail_n = 10000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(lg_lv)
+experiment_data <- generate_data_object(experiment_list)
+experiment_estimators <- list(truth)#, spline,gd_spline_vanilla,gd_spline_vanilla_proj)
+experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
+
+plot_lg_lv <- list(type = "field_delta_paths", experiments = list(c(data = 1, estimator = 1, ref = 1)))#,c(data = 1, estimator = 2, ref = 1),
+#                                                               c(data = 1, estimator = 3, ref = 1),c(data = 1, estimator = 4, ref = 1)))
+visualize_results(experiment_results, list(plot_lg_lv))
+
+## Gause
+first_gause <- list(name = "RZ Test", system = "gause", params = list(a = 2.8, b = 0.7, c = 1.35, r = 3.5, k = 1.5, K = 1.4), n = 10000, sample_density = 0.1, var_x = 0.03, var_y = 0.03,
                  lc_tail_n = 10000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 1, noise_seed = 2)
 experiment_list <- list(first_gause)
 experiment_data <- generate_data_object(experiment_list)
-experiment_estimators <- list(truth, spline)
+experiment_estimators <- list(truth, spline,gd_spline_vanilla,gd_spline_vanilla2)
 experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
 
-plot_gause <- list(type = "solution_path", experiments = list(c(data = 1, estimator = 1),c(data = 1, estimator = 2)))#,c(data = 1, estimator = 3)))
+
+plot_gause <- list(type = "field_delta_paths", experiments = list(c(data = 1, estimator = 1, ref = 1),c(data = 1, estimator = 2, ref = 1),
+                                                               c(data = 1, estimator = 3, ref = 1),c(data = 1, estimator = 4, ref = 1)))#,
+                                                               #c(data = 1, estimator = 5, ref = 1),c(data = 1, estimator = 6, ref = 1)))
 visualize_results(experiment_results, list(plot_gause))
 
 
