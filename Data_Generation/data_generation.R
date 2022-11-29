@@ -2,6 +2,34 @@
 ## Data Generation
 ##
 
+library(deSolve)
+
+#####################
+# Smooth Noisy Data #
+#####################
+
+#' Smooth Noisy Samples
+#' 
+#' This function takes noisy data as an input and returns a smoothed version using splines
+#' If gradient data is not observed, this function can also impute that after smoothing
+#' Additional control is given to the splines through optional parameters
+#'
+#' TODO: Complete
+#' @param orig_data 
+#' @param data 
+#' @param impute_grad 
+#' @param lambda 
+#' @param norder 
+#' @param nbasis 
+#' @param penalty_order 
+#' @param max_t 
+#' @param return_type 
+#' @param title 
+#'
+#' @return
+#' @export
+#'
+#' @examples
 spline_smooth_noisy_samples <- function(orig_data, data, impute_grad = F, 
                                         lambda = 1e-10, norder = 4, nbasis = 48, penalty_order = 2, max_t = 1,
                                         return_type = "bspline", title = ""){
@@ -147,15 +175,17 @@ spline_smooth_noisy_samples <- function(orig_data, data, impute_grad = F,
   }
 }
 
+########################
+# Abhi's Original Data #
+########################
 
+#' Get Abhi's VdP Data
+#' 
+#' This function reads the saved `.csv` files for the first example in the project
+#'
+#' @return sampled_data (data.frame) 1000 samples [x,y,f_x,f_y]
+#' @export
 get_abhi_data <- function(){
-  # Returns Abhi's simulated data
-  # 
-  ## Inputs:
-  # None
-  #
-  ## Outputs:
-  # sampled_data (data.frame): 1000 samples [x,y,f_x,f_y]
   
   # load data from csv into df
   x_df = read.csv("Saved_Data/Abhi/x.csv", header = FALSE, col.names = c("x"))
@@ -176,12 +206,16 @@ get_abhi_data <- function(){
   
 }
 
-generate_van_der_pol <- function(params, num_samples = 1500, sample_density = 0.1){
+##############
+# Van der Pol #
+##############
+
+generate_van_der_pol_samples <- function(system_params, num_samples = 1500, sample_density = 0.1){
   # function which returns samples from a Van der Pol system specified by \mu
   # initial condition is randomly selected
   # 
   ## Inputs:
-  # params (numeric): mu parameter for Van der pol system
+  # system_params (numeric): mu parameter for Van der pol system
   # num_samples (integer)[optional]: number of samples to generate
   # sample_density (numeric)[optional]: `lsoda` Delta t between samples
   #
@@ -189,16 +223,19 @@ generate_van_der_pol <- function(params, num_samples = 1500, sample_density = 0.
   # sampled_data (data.frame): num_samples samples; columns in [x,y]
   
   # the only parameter for this model is mu
-  if (length(params)>1){stop('Error: Too many Van Der Pol parameters')}
-  mu <- params$mu
-  
+  if (length(system_params)>1){stop('Error: Too many Van Der Pol parameters')}
+
   # randomly pick the IC in [-10, 10] x [-10, 10]
   initial_condition <- runif(2, min = -10, max = 10)
   names(initial_condition) <- c('x','y')
-  
+
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_van_der_pol_gradient, mu))
-  derivative_evals <- t(apply(traj[,2:3], 1, eval_van_der_pol_gradient, t = 0, mu = mu, list = T))
+  # unlist needed because of lsoda-friendly return format in eval_van_der_pol_gradient
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_van_der_pol_gradient, system_params))
+  derivative_evals <- matrix(
+    unlist(apply(traj[,2:3], 1, eval_van_der_pol_gradient, t = 0, system_params = system_params),use.names=F),
+    ncol=(ncol(traj)-1),byrow=T)
+
   traj['f_x'] <- derivative_evals[,1] # TODO: is there a way to get the gradient with `lsoda` as opposed to manually?
   traj['f_y'] <- derivative_evals[,2]
   
@@ -206,129 +243,92 @@ generate_van_der_pol <- function(params, num_samples = 1500, sample_density = 0.
   
 }
 
-eval_van_der_pol_gradient <- function(t, v, mu, list = F){
+eval_van_der_pol_gradient <- function(t, v, system_params){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
+  
+  mu <- system_params$mu
   x <- v[1]
   y <- v[2]
   
   dx <- mu*(x - x^3/3 - y)
   dy <- (1/mu)*x
   
-  ## this form allows sampling when mu = 0 <-> uniform circular motion
-  ## however, it doesn't work with `lsoda` for unknown reasons
-  #dx <- y
-  #dy <- mu*(1-x^2)*y - x
-  
-  # different return format if used in `lsoda` or not
-  if(list){return(c(dx,dy))}
   return(list(as.vector(c(dx,dy))))
 }
 
-van_der_pol_gradient_helper <- function(v, mu){
+##################
+# Lotka-Volterra #
+##################
 
-  # redcued form not for lsoa
-  x <- v[1]
-  y <- v[2]
-  
-  dx <- mu*(x - x^3/3 - y)
-  dy <- (1/mu)*x
-  
-  ## this form allows sampling when mu = 0 <-> uniform circular motion
-  ## however, it doesn't work with `lsoda` for unknown reasons
-  #dx <- y
-  #dy <- mu*(1-x^2)*y - x
-  
-  # different return format if used in `lsoda` or not
-  return(matrix(c(dx,dy), nrow = 1))
-}
-
-generate_lv <- function(params, num_samples = 1500, sample_density = 0.1){
+generate_lv_samples <- function(system_params, num_samples = 1500, sample_density = 0.1){
   # randomly pick the IC
   initial_condition <- runif(2, min = 0, max = 10)
   names(initial_condition) <- c('x','y')
   
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), 
-                           eval_lv_gradient, params))
-  derivative_evals <- t(apply(traj[,2:3], 1, eval_lv_gradient, t = 0, params = params, list = T))
-  traj['f_x'] <- derivative_evals[,1] # TODO: is there a way to get the gradient with `lsoda` as opposed to manually?
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), 
+                           eval_lv_gradient, system_params))
+  derivative_evals <- matrix(
+    unlist(apply(traj[,2:3], 1, eval_lv_gradient, t = 0, system_params = system_params),use.names=F),
+    ncol=(ncol(traj)-1),byrow=T)
+  
+  traj['f_x'] <- derivative_evals[,1]
   traj['f_y'] <- derivative_evals[,2]
   
   return(traj[,-1])
   
 }
 
-eval_lv_gradient <- function(t, v, params, list = F){
+eval_lv_gradient <- function(t, v, system_params, list = F){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
   
-  dx <- params$alpha*x - params$beta*x*y
-  dy <- params$delta*x*y - params$gamma*y
+  dx <- system_params$alpha*x - system_params$beta*x*y
+  dy <- system_params$delta*x*y - system_params$gamma*y
   
-  
-  # different return format if used in `lsoda` or not
-  if(list){return(c(dx,dy))}
   return(list(as.vector(c(dx,dy))))
 }
 
-lv_gradient_helper <- function(v, params){
-  
-  # redcued form not for lsoa
-  x <- v[1]
-  y <- v[2]
-  
-  dx <- params$alpha*x - params$beta*x*y
-  dy <- params$delta*x*y - params$gamma*y
-  
-  # different return format if used in `lsoda` or not
-  return(matrix(c(dx,dy), nrow = 1))
-}
+##################################
+# Log-Transformed Lotka-Volterra #  
+##################################
 
-generate_log_lv <- function(params, num_samples = 1500, sample_density = 0.1){
+generate_log_lv_samples <- function(system_params, num_samples = 1500, sample_density = 0.1){
   # randomly pick the IC
   initial_condition <- runif(2, min = 5, max = 10)
   names(initial_condition) <- c('x','y')
   
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), 
-                           eval_log_lv_gradient, params))
-  derivative_evals <- t(apply(traj[,2:3], 1, eval_log_lv_gradient, t = 0, params = params, list = T))
-  traj['f_x'] <- derivative_evals[,1] # TODO: is there a way to get the gradient with `lsoda` as opposed to manually?
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), 
+                           eval_log_lv_gradient, system_params))
+  derivative_evals <- matrix(
+    unlist(apply(traj[,2:3], 1, eval_log_lv_gradient, t = 0, system_params = system_params),use.names=F),
+    ncol=(ncol(traj)-1),byrow=T)
+  
+  traj['f_x'] <- derivative_evals[,1]
   traj['f_y'] <- derivative_evals[,2]
   
   return(traj[,-1])
   
 }
 
-eval_log_lv_gradient <- function(t, v, params, list = F){
+eval_log_lv_gradient <- function(t, v, system_params, list = F){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
   
-  d_x <- params$alpha - params$beta*exp(y)
-  d_y <- params$delta*exp(x) - params$gamma
+  d_x <- system_params$alpha - system_params$beta*exp(y)
+  d_y <- system_params$delta*exp(x) - system_params$gamma
   
-  
-  
-  # different return format if used in `lsoda` or not
-  if(list){return(c(d_x,d_y))}
   return(list(as.vector(c(d_x,d_y))))
 }
 
-log_lv_gradient_helper <- function(v, params){
-  # redcued form not for lsoa
-  x <- v[1]
-  y <- v[2]
-  
-  d_x <- params$alpha - params$beta*exp(y)
-  d_y <- params$delta*exp(x) - params$gamma
-  
-  # different return format if used in `lsoda` or not
-  return(matrix(c(d_x,d_y), nrow = 1))
-}
+########################
+# Rosenzweig-MacArthur #  
+########################
 
-generate_gause <- function(system_params, num_samples = 1500, sample_density = 0.1){
+generate_rzma_samples <- function(system_params, num_samples = 1500, sample_density = 0.1){
   a <- system_params$a # saturation point
   b <- system_params$b #  half-saturation constant
   c <- system_params$c # predator growth rate
@@ -341,7 +341,7 @@ generate_gause <- function(system_params, num_samples = 1500, sample_density = 0
   names(initial_condition) <- c('x','y')
   
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_gause_gradient, system_params))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_gause_gradient, system_params))
   derivative_evals <- t(apply(traj[,2:3], 1, eval_gause_gradient, t = 0, params = system_params, list = T))
   traj['f_x'] <- derivative_evals[,1] 
   traj['f_y'] <- derivative_evals[,2]
@@ -350,7 +350,7 @@ generate_gause <- function(system_params, num_samples = 1500, sample_density = 0
   
 }
 
-eval_gause_gradient <- function(t, v, params, list = F){
+eval_rzma_gradient <- function(t, v, params, list = F){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
@@ -361,83 +361,17 @@ eval_gause_gradient <- function(t, v, params, list = F){
   dx <- x*f_x - y*phi*x
   dy <- y*(-params$c + params$k*x*phi)
 
-  # different return format if used in `lsoda` or not
-  if(list){return(c(dx,dy))}
-  return(list(as.vector(c(dx,dy))))
-}
-
-gause_gradient_helper <- function(v, params){
-  
-  # reduced form not for lsoda
-  x <- v[1]
-  y <- v[2]
-  
-  f_x <- params$r * (1 - x/params$K)
-  phi <- params$a / (params$b + x)
-  
-  dx <- x*f_x - y*phi*x
-  dy <- y*(-params$c + params$k*x*phi)
-  
-  # different return format if used in `lsoda` or not
-  return(matrix(c(dx,dy), nrow = 1))
-}
-
-generate_var_speed_circle <- function(params, num_samples = 1500, sample_density = 0.1){
-  # function which returns samples from a Van der Pol system specified by \mu
-  # initial condition is randomly selected
-  # 
-  ## Inputs:
-  # params (numeric): mu parameter for Van der pol system
-  # num_samples (integer)[optional]: number of samples to generate
-  # sample_density (numeric)[optional]: `lsoda` Delta t between samples
-  #
-  ## Outputs:
-  # sampled_data (data.frame): num_samples samples; columns in [x,y]
-  
-  # the only parameter for this model is mu
-  # randomly pick the IC in [-10, 10] x [-10, 10]
-  initial_condition <- runif(2, min = -10, max = 10)
-  names(initial_condition) <- c('x','y')
-  
-  # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_var_speed_circle, NA))
-  derivative_evals <- t(apply(traj[,2:3], 1, eval_var_speed_circle, t = 0, params = NA, list = T))
-  traj['f_x'] <- derivative_evals[,1] # TODO: is there a way to get the gradient with `lsoda` as opposed to manually?
-  traj['f_y'] <- derivative_evals[,2]
-  
-  return(traj[,-1])
-  
-}
-
-eval_var_speed_circle <- function(t, v, params, list = F, matrix = F){
-  # helper function to evaluate gradient of van der pol at point v = (x,y)
-  x <- v[1]
-  y <- v[2]
-  r = sqrt(x^2 + y^2)
-  theta = atan2(y, x)
-  omega = (2-1.75*sin(6*theta - pi/8))
-  dx <- -r*sin(theta)*omega
-  dy <- r*cos(theta)*omega
-  
-  ## this form allows sampling when mu = 0 <-> uniform circular motion
-  ## however, it doesn't work with `lsoda` for unknown reasons
-  #dx <- y
-  #dy <- mu*(1-x^2)*y - x
-  
-  # different return format if used in `lsoda` or not
-  if(list){return(c(dx,dy))}
-  if(matrix){return(return(matrix(c(dx,dy), nrow = 1)))}
   return(list(as.vector(c(dx,dy))))
 }
 
 
-##
-## Generate Solution Paths
-##
+###########################
+# Generate Solution Paths #
+###########################
 
-## Truth
+# TODO: Avoid dulicated code
 
-generate_true_path_vdp <- function(data, mu, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_true_path_vdp <- function(data, system_params, initial_condition, num_samples = 500, sample_density = 0.1){
   # function which generates a random trajectory along the true gradient field
   # NOTE currently for VdP ONLY
   #
@@ -450,12 +384,12 @@ generate_true_path_vdp <- function(data, mu, initial_condition, num_samples = 50
 
   initial_condition <- unlist(initial_condition)
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_van_der_pol_gradient, mu))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_van_der_pol_gradient, system_params))
   return(traj[,-1])
   
 }
 
-generate_true_path_var_circle <- function(data, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_true_path_rzma <- function(data, system_params, initial_condition, num_samples = 500, sample_density = 0.1){
   # function which generates a random trajectory along the true gradient field
   #
   ## Inputs:
@@ -466,49 +400,35 @@ generate_true_path_var_circle <- function(data, initial_condition, num_samples =
   # sampled_path (data.frame): num_samples samples; columns in [x,y]
   initial_condition <- unlist(initial_condition)
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_var_speed_circle, params))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_rzma_gradient, system_params))
   return(traj[,-1])
   
 }
 
-generate_true_path_gause <- function(data, params, initial_condition, num_samples = 500, sample_density = 0.1){
-  # function which generates a random trajectory along the true gradient field
-  #
-  ## Inputs:
-  # data (matrix): matrix of limit cycle data to regress on; columns (x,y,f_x,f_y)
-  # num_samples (integer)[optional]: number of samples to generate
-  #
-  ## Outputs:
-  # sampled_path (data.frame): num_samples samples; columns in [x,y]
+generate_true_path_lv <- function(data, system_params, initial_condition, num_samples = 500, sample_density = 0.1){
   initial_condition <- unlist(initial_condition)
-  # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_gause_gradient, params))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_lv_gradient, system_params))
   return(traj[,-1])
   
 }
 
-generate_true_path_lv <- function(data, params, initial_condition, num_samples = 500, sample_density = 0.1){
+generate_true_path_log_lv <- function(data, system_params, initial_condition, num_samples = 500, sample_density = 0.1){
   initial_condition <- unlist(initial_condition)
-  # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_lv_gradient, params))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_log_lv_gradient, system_params))
   return(traj[,-1])
   
 }
 
-generate_true_path_log_lv <- function(data, params, initial_condition, num_samples = 500, sample_density = 0.1){
-  initial_condition <- unlist(initial_condition)
-  # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_log_lv_gradient, params))
-  return(traj[,-1])
-  
-}
+########################
+# Classical Estimators #
+########################
 
 ## Nadaraya Watson
 
-nw_path_helper <- function(t,y,parms){
-  # helper function to get nw gradient in lsoda
-  data <- parms[[1]]
-  bw_matrix <- parms[[2]]
+nw_path_helper <- function(t,y,params){
+  # helper function to get nw gradient in deSolve::lsoda
+  data <- params[[1]]
+  bw_matrix <- params[[2]]
   grad_pred <- NW_regression_cpp(unname(matrix(y,nrow = 1)), data, bw_matrix)
   grad_pred.lsoda <- list(c(x = grad_pred[1,1], y = grad_pred[1,2])) # reformat as list with named vector
   return(grad_pred.lsoda)
@@ -532,7 +452,7 @@ generate_nw_path <- function(data, estimator, initial_condition, num_samples = 5
   initial_condition <- unlist(initial_condition)
   bw_matrix <- h*diag(2)
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
                            nw_path_helper,list(as.matrix(data),bw_matrix)))
   return(traj[,-1])
   
@@ -540,10 +460,10 @@ generate_nw_path <- function(data, estimator, initial_condition, num_samples = 5
 
 ## LOESS
 
-loess_path_helper <- function(t,y,parms){
+loess_path_helper <- function(t,y,params){
   # helper function to get nw gradient in lsoda
-  data <- parms[[1]]
-  h <- parms[[2]]
+  data <- params[[1]]
+  h <- params[[2]]
   grad_pred <- get_loess_pred(unname(matrix(y,nrow = 1)), data, h)
   grad_pred.lsoda <- list(c(x = grad_pred[1,1], y = grad_pred[1,2])) # reformat as list with named vector
   return(grad_pred.lsoda)
@@ -556,7 +476,7 @@ generate_loess_path <- function(data, estimator, initial_condition, num_samples 
   h <- estimator$params$h
   initial_condition <- unlist(initial_condition)
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
                            loess_path_helper,list(as.matrix(data),h)))
   return(traj[,-1])
   
@@ -568,7 +488,7 @@ generate_spline_path <- function(estimator, initial_condition, num_samples = 300
   initial_condition <- unlist(initial_condition)
   
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
                            bifd_spline_gradient,estimator$sfd_list))
   return(traj[,-1])
   
@@ -576,10 +496,10 @@ generate_spline_path <- function(estimator, initial_condition, num_samples = 300
 
 ## k-NN
 
-knn_path_helper <- function(t,y,parms){
+knn_path_helper <- function(t,y,params){
   # helper function to get nw gradient in lsoda
-  data <- parms[[1]]
-  k <- parms[[2]]
+  data <- params[[1]]
+  k <- params[[2]]
   grad_pred <- eval_knn_fit(unname(matrix(y,nrow = 1)), data, k)
   grad_pred.lsoda <- list(c(x = grad_pred[1,1], y = grad_pred[1,2])) # reformat as list with named vector
   return(grad_pred.lsoda)
@@ -603,12 +523,15 @@ generate_knn_path <- function(data, estimator, initial_condition, num_samples = 
   k <- estimator$params$k
   initial_condition <- unlist(initial_condition)
   
-  traj <- data.frame(lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density),
                            knn_path_helper,list(as.matrix(data),k)))
   return(traj[,-1])
   
 }
 
+########################
+# Simulation Functions #
+########################
 
 #' This function evaluates the gradient field over a user-specified grid
 #'
@@ -623,20 +546,21 @@ generate_knn_path <- function(data, estimator, initial_condition, num_samples = 
 #' y_grid <- seq(-1, 1, len = y_grid_size)
 #' eval_grid <- unname(as.matrix(expand.grid(x_grid,y_grid))) # convert to N x 2 matrix
 #' true_field <- generate_grid_data("van_der_pol", c(2), eval_grid)
-generate_true_grid_data <- function(model, params, eval_grid){
+generate_true_grid_data <- function(model, system_params, eval_grid){
   if (model == "van_der_pol"){
-    grid_gradient <- t(apply(eval_grid, 1, van_der_pol_gradient_helper, mu = params$mu))
-  } else if(model == "gause"){
-    grid_gradient <- t(apply(eval_grid, 1, gause_gradient_helper, params = params))
+    grid_gradient <- matrix(unlist(apply(eval_grid, 1, eval_van_der_pol_gradient, t = 0, system_params = system_params),
+                                   use.names=F),ncol=ncol(eval_grid),byrow=T)
+  } else if(model == "rzma"){
+    grid_gradient <- matrix(unlist(apply(eval_grid, 1, eval_rzma_gradient, t = 0, system_params = system_params),
+                                   use.names=F),ncol=ncol(eval_grid),byrow=T)
   }
   else if(model == "lotka_volterra"){
-    grid_gradient <- t(apply(eval_grid, 1, lv_gradient_helper, params = params))
+    grid_gradient <- matrix(unlist(apply(eval_grid, 1, eval_lv_gradient, t = 0, system_params = system_params),
+                                   use.names=F),ncol=ncol(eval_grid),byrow=T)
   }  
   else if(model == "log_lotka_volterra"){
-    grid_gradient <- t(apply(eval_grid, 1, log_lv_gradient_helper, params = params))
-  }
-  else if(model == "var_circle"){
-    grid_gradient <- t(apply(eval_grid, 1, eval_var_speed_circle, t = 0, params = NA, matrix = T))
+    grid_gradient <- matrix(unlist(apply(eval_grid, 1, eval_log_lv_gradient, t = 0, system_params = system_params),
+                                   use.names=F),ncol=ncol(eval_grid),byrow=T)
   }
   else if(model == "abhi"){
     # true field is unknown
@@ -647,10 +571,6 @@ generate_true_grid_data <- function(model, params, eval_grid){
   }
   return(grid_gradient)
 }
-
-###################
-### Generalized ###
-###################
 
 get_gradient_field <- function(data, estimator){
   
@@ -699,30 +619,21 @@ generate_solution_path <- function(data, estimator, initial_condition){
   evaluated_field <- NA
   if (estimator$method == "truth"){
     if (estimator$params$name == "van_der_pol"){
-      evaluated_field <- generate_true_path_vdp(data, estimator$params$mu, initial_condition) 
-    } else if (estimator$params$name == "var_circle") {
-        evaluated_field <- generate_true_path_var_circle(data, initial_condition)
-    }
-    else if (estimator$params$name == "lotka_volterra") {
+      evaluated_field <- generate_true_path_vdp(data, estimator$params, initial_condition) 
+    } else if (estimator$params$name == "lotka_volterra") {
       evaluated_field <- generate_true_path_lv(data, estimator$params, initial_condition) 
-    }
-    else if (estimator$params$name == "log_lotka_volterra") {
+    } else if (estimator$params$name == "log_lotka_volterra") {
       evaluated_field <- generate_true_path_log_lv(data, estimator$params, initial_condition) 
-    }
-    else if (estimator$params$name == "gause") {
+    } else if (estimator$params$name == "gause") {
       evaluated_field <- generate_true_path_gause(data, estimator$params, initial_condition)
     }
-  }
-  else if (estimator$method == "knn"){
+  } else if (estimator$method == "knn"){
     evaluated_field <- generate_knn_path(data, estimator, initial_condition)
-  }
-  else if (estimator$method == "nw"){
+  } else if (estimator$method == "nw"){
     evaluated_field <- generate_nw_path(data, estimator, initial_condition)
-  }
-  else if (estimator$method == "loess"){
+  } else if (estimator$method == "loess"){
     evaluated_field <- generate_loess_path(data, estimator, initial_condition)
-  }
-  else if ((estimator$method == "spline") | (estimator$method == "gd_spline")){
+  } else if ((estimator$method == "spline") | (estimator$method == "gd_spline")){
     evaluated_field <- generate_spline_path(estimator, initial_condition)
   }
   
