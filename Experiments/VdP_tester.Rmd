@@ -1,0 +1,58 @@
+---
+title: "Van der Pol Test Environment"
+author: "William Torous"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+This markdown file is a minimum reproducible example of the simulation pipeline using a Van der Pol system.
+
+```{r rmd setup,include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE)
+```
+
+```{r r setup,message=F,cache=F}
+library(here)
+source(here::here("simulation_fns.R"))
+```
+
+## Data Generation
+
+500 samples from the tail of the limit cycle are generated.
+
+```{r get data}
+some_noise <- list(name = "VDP", system = "van_der_pol", params = list(mu=3), n = 1000, sample_density = 0.1, var_x = 0.05, var_y = 0.05,
+                   lc_tail_n = 500, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(some_noise)
+experiment_data <- generate_data_object(experiment_list)
+```
+
+## Estimator Specification
+
+The estimators which the simulations compare are defined here.
+
+```{r define esimtators}
+truth <- list(method = "truth",  params = list())
+spline <- list(method = "spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20, side_info = list()))
+```
+
+## Fit Estimators
+
+Here the estimators are fit, but not analyzed.
+
+```{r fit estimators}
+experiment_estimators <- list(truth, spline)
+experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
+```
+
+## Analyze Results
+
+Plots are used to compare the various estimators.
+
+```{r analysis}
+plot_delta <- list(type = "field_delta_paths", experiments = list(c(data = 1, estimator = 1, ref = 1),c(data = 1, estimator = 2, ref = 1)))
+visualize_results(experiment_results, list(plot_delta))
+```
+
+
+
