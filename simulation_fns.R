@@ -23,31 +23,22 @@ sourceCpp(here::here('Estimation_Methods','loess.cpp'))
 #####################
 
 generate_limit_cycle_data <- function(system, params, var_x, var_y, data_seed = 2022, noise_seed = 302,
-                                      num_samples = 1500, lc_length = 500, sample_density = 0.1,
+                                      num_samples = 1500, sample_density = 0.1,
                                       save_csv = F, smooth = "bspline", title = "",
                                       noisy_smooth_basis = 48){  
   set.seed(data_seed)
   
   if (system == "van_der_pol"){
     sampled_data <- generate_van_der_pol_samples(params, num_samples=num_samples,sample_density=sample_density)
-  }
-  else if (system == "gause"){
-    sampled_data <- generate_gause(params, num_samples=num_samples,sample_density=sample_density)
-  }
-  else if(system == "lotka_volterra"){
-    sampled_data <- generate_lv(params, num_samples=num_samples,sample_density=sample_density)
-  }
-  else if(system == "log_lotka_volterra"){
-    sampled_data <- generate_log_lv(params, num_samples=num_samples,sample_density=sample_density)
-  }
-  else if(system == "abhi"){
+  } else if (system == "rzma"){
+    sampled_data <- generate_rzma_samples(params, num_samples=num_samples,sample_density=sample_density)
+  } else if(system == "lotka_volterra"){
+    sampled_data <- generate_lv_samples(params, num_samples=num_samples,sample_density=sample_density)
+  } else if(system == "log_lotka_volterra"){
+    sampled_data <- generate_log_lv_samples(params, num_samples=num_samples,sample_density=sample_density)
+  } else if(system == "abhi"){
     sampled_data <- get_abhi_data()
-  }
-  
-  else if(system == "var_circle"){
-    sampled_data <- generate_var_speed_circle(NA, num_samples=num_samples,sample_density=sample_density)
-  }
-  else{
+  } else{
     stop('Error: ', system, ' system not implemented.')
   }
   
@@ -57,15 +48,12 @@ generate_limit_cycle_data <- function(system, params, var_x, var_y, data_seed = 
     write_csv(sampled_data, file_name)
   }
   
-  # TODO: Update rest of code
-  sampled_data <- tail(sampled_data, lc_length) # truncate to final samples
-  
   if ((var_x != 0) | (var_y != 0)){
     # add Gaussian noise to position of observations
     set.seed(noise_seed)
     noise_matrix <- mvrnorm(nrow(sampled_data), c(0,0,0,0), diag(c(var_x,var_y,0,0)))
     noisy_samples <- sampled_data + noise_matrix 
-    smoothed_positions <- spline_smooth_noisy_samples(sampled_data, noisy_samples, nbasis=noisy_smooth_basis, max_t = lc_length * sample_density,
+    smoothed_positions <- spline_smooth_noisy_samples(sampled_data, noisy_samples, nbasis=noisy_smooth_basis, max_t = num_samples * sample_density,
                                                       lambda = 1e-12, return_type = smooth, title = title)
     #smoothed_positions <- loess_smooth_noisy_samples(noisy_samples,h=25)
     sampled_data <- cbind(smoothed_positions, noisy_samples[,c(3,4)])
@@ -74,7 +62,7 @@ generate_limit_cycle_data <- function(system, params, var_x, var_y, data_seed = 
   return(sampled_data)
 }
 
-generate_data_object <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
+generate_data_object_model <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
   # copy to modify
   data_list <- experiment_list
   
@@ -90,7 +78,7 @@ generate_data_object <- function(experiment_list, noisy_smooth_basis = 48, save_
     smoother <- data_list[[i]]$smoother
     data_seed <- data_list[[i]]$data_seed
     noise_seed <- data_list[[i]]$noise_seed
-    lc_length <- data_list[[i]]$lc_length
+    lc_tail_n <- data_list[[i]]$lc_tail_n
     
     # generate data
     data_list[[i]]$limit_cycle_samples <- generate_limit_cycle_data(system_name, system_params, 
@@ -120,8 +108,8 @@ generate_data_object <- function(experiment_list, noisy_smooth_basis = 48, save_
   return(data_list)
 }
 
-generate_data_object_from_samples <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
-  # copy to modify
+generate_data_object_obs <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
+  # No explicit model
   data_list <- experiment_list
   
   for (i in 1:length(data_list)){
