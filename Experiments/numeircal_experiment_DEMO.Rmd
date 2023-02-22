@@ -1,0 +1,79 @@
+---
+title: "Numerical Experiment Demonstration"
+author: "Hooker Lab"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r rmd_setup,include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,cache=FALSE)
+```
+
+```{r r_setup,message=FALSE}
+library(here)
+source(here::here("pipeline.R"))
+```
+
+# Introduction
+
+This notebook demonstrates how to run a numerical experiment for the stability-informed gradient field estimation methodology. The goal of the experiment suite is to quantify and visualize how our proposed methodology compares to existing approaches and also how changes in system parameters, estimator hyperparameters, and noise affect results.
+
+
+# Set Up
+
+The main objects of interest are the trial (including system parameters and sampling details) and the estimators. For use across trials, we define a nested list with four estimators for a gradient field, including the truth when the parameters are known.
+
+```{r set_estimators}
+estimator_list <- list(
+	list(method="truth"),
+	list(method="nw",bandwidth_matrix = 0.25*diag(2)),
+	list(method="vanilla_spline",side_info=list(),norder=6,nbasis=12,penalty_order=2,lambda=1e-8),
+	list(method="gd_spline",side_info=list(),norder=6,nbasis=12,penalty_order=2,lambda=1e-8,
+		 gd_params = list(algorithm="Vanilla",eig_rank=1,eta=0.02,dt_radius=0,
+		 				 batching=list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T)))
+)
+```
+
+# Example: Van der Pol with $\mu = 2$
+
+As mentioned before, setting up a trial requires the user to define the system, noise, and replications.
+
+```{r vdp_data}
+vdp_trial <- generate_experiment_trial("example_vdp", system_name = "van_der_pol", system_parameters = list(mu=2),
+									  random_seed = 2, num_samples = 1000, sample_density = 0.1,
+									  replicates = 3, var_x = 0.05, var_y = 0.05)
+vdp_trial_smooth <- smooth_trial(vdp_trial)
+```
+
+Then a fully factorial cross of replicates estimators is calculated. The `vdp_trial_fit` contains a function for each mapping position to an estimated gradient.
+
+```{r vdp_fit}
+vdp_trial_fit <- apply_estimators(vdp_trial_smooth,estimator_list)
+```
+
+For now MSE over a grid or $\delta$-tube is the only quantification. The integrated solution paths and visualizations will be added shortly.
+
+```{r get_grid_mse}
+get_grid_mse(vdp_trial_fit$replicates[[1]])
+get_grid_mse(vdp_trial_fit$replicates[[2]])
+get_grid_mse(vdp_trial_fit$replicates[[3]])
+```
+
+```{r get_dt_mse}
+get_dt_mse(vdp_trial_fit$replicates[[1]], radius_val = 0.1, sample_frac = 0.9)
+get_dt_mse(vdp_trial_fit$replicates[[1]], radius_val = 0.02, sample_frac = 0.9)
+
+get_dt_mse(vdp_trial_fit$replicates[[2]], radius_val = 0.1, sample_frac = 0.9)
+get_dt_mse(vdp_trial_fit$replicates[[2]], radius_val = 0.02, sample_frac = 0.9)
+
+get_dt_mse(vdp_trial_fit$replicates[[3]], radius_val = 0.1, sample_frac = 0.9)
+get_dt_mse(vdp_trial_fit$replicates[[2]], radius_val = 0.02, sample_frac = 0.9)
+
+```
+
+
+```{r session_info}
+utils::sessionInfo()
+```
+

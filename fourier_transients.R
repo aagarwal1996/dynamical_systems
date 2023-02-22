@@ -154,9 +154,9 @@ derivative_comparison <- function(full_samples,sample_rate,transient_cutoff){
 ########################
 
 # Generate Van der Pol Data with No Noise 
-sample_deltaT <- 0.1 # inverse of sampling rate
-vdp_data_noiseless <- list(name = "VDP", system = "van_der_pol", params = list(mu=3),
-                              n = 1000, lc_tail_n = 700, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+sample_deltaT <- 0.01 # inverse of sampling rate
+vdp_data_noiseless <- list(name = "VDP", system = "van_der_pol", params = list(mu=.05),
+                              n = 5000, lc_tail_n = 4000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
                               x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
                               smoother = "bspline", data_seed = 2, noise_seed = 2)
 experiment_list <- list(vdp_data_noiseless)
@@ -173,7 +173,7 @@ plot_delta <- list(type = "field_delta_paths", experiments = list(c(data = 1, es
 visualize_results(experiment_results, list(plot_delta))
 
 #spectral_tibble <- get_coordinate_spectrum(experiment_data[[1]]$limit_cycle_samples)
-derivative_comparison(experiment_data[[1]]$limit_cycle_samples,1/sample_deltaT,600)
+derivative_comparison(experiment_data[[1]]$limit_cycle_samples,1/sample_deltaT,1200)
 analyze_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,55)
 analyze_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,70)
 analyze_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,100)

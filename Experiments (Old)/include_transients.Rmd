@@ -1,0 +1,112 @@
+---
+title: "Including Transients"
+author: "William Torous"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r r setup,message=F,cache=F}
+library(here)
+source(here::here("simulation_fns.R"))
+```
+
+In this notebook we explore how the inclusion or exclusion of transient data affects our estimated dynamics. The behavior of estimated transients and changes to the limit cycle shape are of particular note.
+
+# Van der Pol
+
+We test the Van der Pol system with varying stiffness. The full sample, including transients, has $n=1000$ and truncations to the first $100$, last $100$ and last $500$ samples are considered.
+
+## Low Stiff $\mu=1$
+
+```{r get data mu_1}
+
+total_n <- 1000
+mu_param = 7
+
+full_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=mu_param),
+                  n = total_n, sample_density = 0.1, lc_tail_n = total_n,
+                  var_x = 0.1, var_y = 0.1,
+                  x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline",
+                  data_seed = 2, noise_seed = 2)
+
+truncated_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=mu_param),
+                  n = total_n, sample_density = 0.1, lc_tail_n = 500,
+                  var_x = 0.1, var_y = 0.1,
+                  x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline",
+                  data_seed = 2, noise_seed = 2)
+
+tail_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=mu_param),
+                  n = total_n, sample_density = 0.1, lc_tail_n = 100,
+                  var_x = 0.1, var_y = 0.1,
+                  x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline",
+                  data_seed = 2, noise_seed = 2)
+
+head_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=mu_param),
+                  n = 100, sample_density = 0.1, lc_tail_n = 100,
+                  var_x = 0.1, var_y = 0.1,
+                  x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline",
+                  data_seed = 2, noise_seed = 2)
+
+experiment_list <- list(full_data,truncated_data,tail_data,head_data)
+experiment_data <- generate_data_object_model(experiment_list)
+```
+For comparison we consider the true trajectories, a $6^{th}$-order b-spline fit with $20$ basis functions, and 
+```{r define esimtators}
+truth <- list(method = "truth",  params = list())
+spline <- list(method = "spline",  params = list(lambda = 1e-2, norder = 6, nbasis = 20, side_info = list()))
+gd_spline_vanilla <- list(method = "gd_spline",
+                          params = list(lambda = 1e-2, norder = 6, nbasis = 20,
+                          side_info = list(),
+                          gd_params = list(algorithm = "Vanilla",
+                                           eig_rank = 1, eta=0.02, dt_radius=0,
+                                           batching = list (num_iterations=1,batches_per=1600,
+                                                            batch_size=1,skip_negative=T) 
+                                           )
+                          ))
+```
+
+
+```{r fit estimators,echo=FALSE}
+experiment_estimators <- list(truth, spline,gd_spline_vanilla)
+experiment_results <- evaluate_gradient_methods(experiment_data, experiment_estimators)
+```
+
+
+```{r analysis}
+plot_delta <- list(type = "field_delta_paths", experiments = list(
+  c(data = 1, estimator = 1, ref = 1),
+  c(data = 1, estimator = 2, ref = 1),
+  c(data = 1, estimator = 3, ref = 1)
+))
+visualize_results(experiment_results, list(plot_delta))
+```
+
+```{r analysis2}
+plot_delta <- list(type = "field_delta_paths", experiments = list(
+  c(data = 2, estimator = 1, ref = 1),
+  c(data = 2, estimator = 2, ref = 1),
+  c(data = 2, estimator = 3, ref = 1)
+))
+visualize_results(experiment_results, list(plot_delta))
+```
+
+```{r analysis3}
+plot_delta <- list(type = "field_delta_paths", experiments = list(
+  c(data = 3, estimator = 1, ref = 1),
+  c(data = 3, estimator = 2, ref = 1),
+  c(data = 3, estimator = 3, ref = 1)
+))
+visualize_results(experiment_results, list(plot_delta))
+```
+
+```{r analysis4}
+plot_delta <- list(type = "field_delta_paths", experiments = list(
+  c(data = 4, estimator = 1, ref = 1),
+  c(data = 4, estimator = 2, ref = 1),
+  c(data = 4, estimator = 3, ref = 1)
+))
+visualize_results(experiment_results, list(plot_delta))
+```

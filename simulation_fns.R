@@ -2,17 +2,22 @@
 ## Imports ##
 #############
 
+# packages
 library(fda)
 library(tidyverse)
 library(mvtnorm) # for Multivariate Normal density estimates in KDE
-library(shape) # for pretty arrows
 library(ggquiver) # for vector field plots
+library(shape) # for pretty vector arrows in plots
 library(ggpubr) # to generate side-by-side plots
-library(fields) # for thin-plate splines
+library(fields) # for thin-plate splines # TODO: Remove?
 
-source(here::here('Data_Generation','data_generation.R')) # functions to generate data from specific DS are in another file
+# files
+# functions to generate data from specific system
+source(here::here('Data_Generation','data_generation.R'))
+# wrappers for fast Rcpp fit of gradient fields
 source(here::here('Estimation_Methods','bspline.R'))
-source(here::here('Estimation_Methods','bspline_gd_redux.R'))
+# eigenvalue-penalized gradient descent fit
+source(here::here('Estimation_Methods','bspline_gd.R'))
 source(here::here('Estimation_Methods','knn.R'))
 library(Rcpp)
 sourceCpp(here::here('Estimation_Methods','nw_regression.cpp'))
@@ -22,185 +27,226 @@ sourceCpp(here::here('Estimation_Methods','loess.cpp'))
 ## Data Generation ##
 #####################
 
-generate_limit_cycle_data <- function(system, params, var_x, var_y, data_seed = 2022, noise_seed = 302,
-                                      num_samples = 1500, sample_density = 0.1,
-                                      save_csv = F, smooth = "bspline", title = "",
-                                      noisy_smooth_basis = 48){  
-  set.seed(data_seed)
-  
-  if (system == "van_der_pol"){
-    sampled_data <- generate_van_der_pol_samples(params, num_samples=num_samples,sample_density=sample_density)
-  } else if (system == "rzma"){
-    sampled_data <- generate_rzma_samples(params, num_samples=num_samples,sample_density=sample_density)
-  } else if(system == "lotka_volterra"){
-    sampled_data <- generate_lv_samples(params, num_samples=num_samples,sample_density=sample_density)
-  } else if(system == "log_lotka_volterra"){
-    sampled_data <- generate_log_lv_samples(params, num_samples=num_samples,sample_density=sample_density)
-  } else if(system == "abhi"){
-    sampled_data <- get_abhi_data()
-  } else{
-    stop('Error: ', system, ' system not implemented.')
-  }
-  
-  if (save_csv){
-    # TODO: improve file name
-    file_name <- paste0("Saved_Data/",system,"-",format(Sys.time(), "%m_%d_%Y-%H_%M_%S"),".csv")
-    write_csv(sampled_data, file_name)
-  }
-  
-  if ((var_x != 0) | (var_y != 0)){
-    # add Gaussian noise to position of observations
-    set.seed(noise_seed)
-    noise_matrix <- mvrnorm(nrow(sampled_data), c(0,0,0,0), diag(c(var_x,var_y,0,0)))
-    noisy_samples <- sampled_data + noise_matrix 
-    smoothed_positions <- spline_smooth_noisy_samples(sampled_data, noisy_samples, nbasis=noisy_smooth_basis, max_t = num_samples * sample_density,
-                                                      lambda = 1e-12, return_type = smooth, title = title)
-    #smoothed_positions <- loess_smooth_noisy_samples(noisy_samples,h=25)
-    sampled_data <- cbind(smoothed_positions, noisy_samples[,c(3,4)])
-  }
-  colnames(sampled_data) <- c("x","y","f_x","f_y")
-  return(sampled_data)
+#' Generate data object for parameterized systems
+#' 
+#' This function generates samples from specified models and returns a structured list 
+#'
+#' @param experiment_list (list of lists) Each sublist contains the parameterization details for a single data draw
+#' @param save_csv (logical) Whether to save each dataset as a `.csv`
+#'
+#' @return data_list (list of lists) Each sublist contains samples
+#'
+#' @examples
+#' experiment_details <- list(
+#'     list(experiment_name = "Example", system_name = "van_der_pol",
+#'         system_params = list(mu = 1.5), var_x = 0.1, var_y = 0.1,
+#'         data_seed = 2, noise_seed = 2023, num_samples = 1000, sample_density = 0.1,
+#'         smooth_type = "bspline", smooth_lambda = 1e-12, num_basis_fn = 48)
+#' )
+#' example_data <- generate_data_object_model(experiment_details)
+generate_data_object_model <- function(experiment_list, save_csv = FALSE){
+	data_list <- experiment_list # copy to modify
+
+	# iterate over each requested dataset
+	for (i in 1:length(data_list)){
+		experiment_name <- data_list[[i]]$experiment_name
+		# extract sampling parameters. See `generate_limit_cycle_data()` for details
+		system_name <- data_list[[i]]$system_name
+		system_params <- data_list[[i]]$system_params
+		var_x <- data_list[[i]]$var_x
+		var_y <- data_list[[i]]$var_y
+		data_seed <- data_list[[i]]$data_seed
+		noise_seed <- data_list[[i]]$noise_seed
+		num_samples <- data_list[[i]]$num_samples
+		sample_density <- data_list[[i]]$sample_density
+		smooth_type <- data_list[[i]]$smooth_type
+		smooth_lambda <- data_list[[i]]$smooth_lambda
+		num_basis_fn <- data_list[[i]]$num_basis_fn
+
+		# generate data.frame of (noisy) samples
+		data_list[[i]]$limit_cycle_samples <- generate_limit_cycle_data(system_name, system_params,
+			var_x, var_y, data_seed, noise_seed,
+			num_samples, sample_density,
+			smooth_type, smooth_lambda, num_basis_fn,
+			plot_title = experiment_name, save_csv = save_csv)
+	}
+	return(data_list)
 }
 
-generate_data_object_model <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
-  # copy to modify
-  data_list <- experiment_list
-  
-  for (i in 1:length(data_list)){
-    # extract params
-    experiment_name <- data_list[[i]]$name
-    system_name <- data_list[[i]]$system
-    system_params <- data_list[[i]]$params
-    num_samples <- data_list[[i]]$n
-    sample_density <- data_list[[i]]$sample_density
-    var_x <- data_list[[i]]$var_x
-    var_y <- data_list[[i]]$var_y
-    smoother <- data_list[[i]]$smoother
-    data_seed <- data_list[[i]]$data_seed
-    noise_seed <- data_list[[i]]$noise_seed
-    lc_tail_n <- data_list[[i]]$lc_tail_n
-    
-    # generate data
-    data_list[[i]]$limit_cycle_samples <- generate_limit_cycle_data(system_name, system_params, 
-                                   var_x = var_x, var_y = var_y, data_seed = data_seed, noise_seed = noise_seed,
-                                   num_samples = num_samples, sample_density = sample_density,
-                                   smooth = smoother, noisy_smooth_basis = noisy_smooth_basis, title = experiment_name,
-                                   save_csv = save_csv)
-    
-    # truncate to tail
-    data_list[[i]]$limit_cycle_tail <- tail(data_list[[i]]$limit_cycle_samples, n = data_list[[i]]$lc_tail_n)
-    
-    # build grid to evaluate over
-    grid_object <- list(xmin = min(data_list[[i]]$limit_cycle_tail$x),
-                        xmax = max(data_list[[i]]$limit_cycle_tail$x),
-                        ymin = min(data_list[[i]]$limit_cycle_tail$y),
-                        ymax = max(data_list[[i]]$limit_cycle_tail$y)) 
-    
-    grid_object$x_grid = seq(floor(grid_object$xmin) - data_list[[i]]$extrapolation_size , ceiling(grid_object$xmax) + data_list[[i]]$extrapolation_size, 
-                             len = data_list[[i]]$x_grid_size)
-    grid_object$y_grid = seq(floor(grid_object$ymin) - data_list[[i]]$extrapolation_size, ceiling(grid_object$ymax) + data_list[[i]]$extrapolation_size, 
-                             len = data_list[[i]]$y_grid_size)
-    grid_object$eval_grid = unname(as.matrix(expand.grid(grid_object$x_grid,grid_object$y_grid)))
-    
-    data_list[[i]]$grid <-grid_object
-  }
-  
-  return(data_list)
+#' Generate limit cycle data for a given system
+#'
+#' This function returns (noisy) samples along one trajectory of a system parameterized by the inputs.
+#'
+#' @param system_name (string) The name of the system to generate data from
+#' @param system_params (list of numeric) A list setting all parameters for the system
+#' @param var_x (numeric) The variance of white noise added to the x-coordinate of samples
+#' @param var_y (numeric) The variance of white noise added to the y-coordinate of samples
+#' @param data_seed (integer) A seed for generating samples from the system
+#' @param noise_seed (integer) A seed for positional noise added to the samples
+#' @param num_samples (integer) The number of samples along a solution path to generate
+#' @param sample_density (integer) The time elapsed between each sample
+#' @param smooth_type (string; "bspline","tps", or "orig") Type of smoothing to apply to noisy samples
+#' @param smooth_lambda (numeric) Smoothing penalty weight, if applicable
+#' @param num_basis_fn (integer) The number of spline basis functions for each coordinate
+#' @param plot_title (string) A title for a plot of original and smoothed samples
+#' @param save_csv (logical) Whether to save the samples in a `.csv` file
+#'
+#' @return sampled_data (data.frame) Samples of gradient and (noisy) position
+#'
+#' @examples
+#' vdp_df <- generate_limit_cycle_data("van_der_pol", list(mu=1.5), 0, 0)
+generate_limit_cycle_data <- function(system_name, system_params, var_x, var_y,
+	data_seed = 2022, noise_seed = 302,
+	num_samples = 1500, sample_density = 0.1,
+	smooth_type = "bspline", smooth_lambda = 1e-12, num_basis_fn = 48,
+	plot_title = "", save_csv = FALSE){ 
+
+	# TODO: Add gradient noise; include time as a covariate in returned data.frame
+	# TODO: Is it useful to return the original and noisy samples?
+	# get samples without noise
+	set.seed(data_seed)
+	if (system_name == "van_der_pol"){
+		sampled_data <- generate_van_der_pol_samples(system_params, num_samples = num_samples,
+			sample_density = sample_density)
+	} else if (system_name == "rzma"){
+		sampled_data <- generate_rzma_samples(system_params, num_samples = num_samples,
+			sample_density=sample_density)
+	} else if(system_name == "lotka_volterra"){
+		sampled_data <- generate_lv_samples(system_params, num_samples = num_samples,
+			sample_density=sample_density)
+	} else if(system_name == "log_lotka_volterra"){
+		sampled_data <- generate_log_lv_samples(system_params, num_samples = num_samples,
+			sample_density=sample_density)
+	} else if(system_name == "abhi"){
+		sampled_data <- get_abhi_data()
+	} else{
+		stop('Error: ', system_name, ' system not implemented.')
+	}
+
+	if (save_csv){
+		file_name <- paste0("Saved_Data/",system_name,"-",format(Sys.time(), "%m_%d_%Y-%H_%M_%S"),".csv")
+		write_csv(sampled_data, file_name)
+	}
+
+	if ((var_x != 0) | (var_y != 0)){
+		# add Gaussian noise to position of observations
+		set.seed(noise_seed)
+		noise_matrix <- mvrnorm(nrow(sampled_data), c(0,0,0,0), diag(c(var_x,var_y,0,0)))
+		noisy_samples <- sampled_data + noise_matrix
+
+		# apply smoothing to the noisy positions
+		smoothed_positions <- spline_smooth_samples(noisy_samples,
+			nbasis = num_basis_fn, max_t = num_samples*sample_density,
+			lambda = smooth_lambda, smooth_type = smooth_type)
+		sampled_data <- cbind(smoothed_positions, noisy_samples[,c(3,4)])
+	}
+
+	colnames(sampled_data) <- c("x","y","f_x","f_y")
+	return(sampled_data)
 }
 
+#' Fill skeleton data object with user-provided data
+#' 
+#' This allows for interface with other simulation functions
+#' For now this does not allow additional noise or smoothing
+#' 
+#' If a data.frame of samples with columns in ("x","y","f_x","f_y") is available,
+#' this function generates a list with that data and the slots from the output of 
+#' `generate_data_object_model()` 
+#'
+#' @param experiment_list (list of lists) Each expected to have a experiment name, system name, and `limit_cycle_samples` data.frame
+#'
+#' @return data_list (list of lists) Fit into a consistent format for analysis
+#'
+#' @examples
+#' user_data <- read.csv(example.csv) # loads data.frame with appropriate columns
+#' experiment_details <- list(
+#'     list(experiment_name = "Example", system_name = "My System", limit_cycle_samples = user_data)
+#' )
 generate_data_object_obs <- function(experiment_list, noisy_smooth_basis = 48, save_csv = F){
-  # No explicit model
-  data_list <- experiment_list
-  
-  for (i in 1:length(data_list)){
-    # extract params
-    experiment_name <- data_list[[i]]$name
-    system_name <- data_list[[i]]$system
-    system_params <- NA
-    num_samples <- NA
-    sample_density <- NA
-    var_x <- NA
-    var_y <- NA
-    smoother <- NA
-    data_seed <- NA
-    noise_seed <- NA
-    
-    # truncate to tail
-    data_list[[i]]$limit_cycle_tail <- tail(data_list[[i]]$limit_cycle_samples, n = data_list[[i]]$lc_tail_n)
-    
-    # build grid to evaluate over
-    grid_object <- list(xmin = min(data_list[[i]]$limit_cycle_tail$x),
-                        xmax = max(data_list[[i]]$limit_cycle_tail$x),
-                        ymin = min(data_list[[i]]$limit_cycle_tail$y),
-                        ymax = max(data_list[[i]]$limit_cycle_tail$y)) 
-    
-    grid_object$x_grid = seq(floor(grid_object$xmin) - data_list[[i]]$extrapolation_size , ceiling(grid_object$xmax) + data_list[[i]]$extrapolation_size, 
-                             len = data_list[[i]]$x_grid_size)
-    grid_object$y_grid = seq(floor(grid_object$ymin) - data_list[[i]]$extrapolation_size, ceiling(grid_object$ymax) + data_list[[i]]$extrapolation_size, 
-                             len = data_list[[i]]$y_grid_size)
-    grid_object$eval_grid = unname(as.matrix(expand.grid(grid_object$x_grid,grid_object$y_grid)))
-    
-    data_list[[i]]$grid <-grid_object
-  }
-  
-  return(data_list)
+
+	# TODO: Allow for user to add their own noise and smoothing; check format of user data
+	data_list <- experiment_list
+
+	for (i in 1:length(data_list)){
+		experiment_name <- data_list[[i]]$experiment_name
+		# extract sampling parameters. See `generate_limit_cycle_data()` for details
+		system_name <- data_list[[i]]$system_name
+		system_params <- NA
+		var_x <- NA
+		var_y <- NA
+		data_seed <- NA
+		noise_seed <- NA
+		num_samples <- NA
+		sample_density <- NA
+		smooth_type <- NA
+		smooth_lambda <- NA
+		num_basis_fn <- NA
+	}
+
+	return(data_list)
 }
 
 ################
 ## Evaluation ##
 ################
 
+#' Estimate gradient fields for datasets
+#'
+#' Compute all crosses of the data and estimator objects
+#'
+#' @param data_list (list of lists) Each sublist is a sampled dataset object 
+#' @param estimator_list (list of lists) Each sublist is an estimator to apply
+#'
+#' @return data_list (list of lists) Input updated with estimated field and fit predictors
+#'
+#' @examples
+#' #TODO: Add me
+evaluate_gradient_methods <- function(data_list, estimator_list){
 
-evaluate_gradient_single <- function(data_object, estimators_list, 
-                                      lc_tail_n = 700, 
-                                      x_grid_size = 24, y_grid_size = 24, extrapolation_size = 0.5){
-  for (i in 1:length(estimators_list)){
-    if (estimators_list[[i]]$method == "truth"){
-        estimators_list[[i]]$params <- data_object$params
-        estimators_list[[i]]$params$name <- data_object$system
-        estimators_list[[i]]$estimated_field <- get_gradient_field(data_object,estimators_list[[i]])$evaluated_field
-    }
-  
-    else if (estimators_list[[i]]$method == "spline"){
-      evaluation_result <-  get_gradient_field(data_object, estimators_list[[i]])
-      estimators_list[[i]]$params <- evaluation_result$params
-      estimators_list[[i]]$estimated_field = evaluation_result$field
-      estimators_list[[i]]$sfd_list = evaluation_result$sfd_list
-    }
-    else if (estimators_list[[i]]$method == "gd_spline"){
-      evaluation_result <-  get_gradient_field(data_object, estimators_list[[i]])
-      estimators_list[[i]]$params <- evaluation_result$params
-      estimators_list[[i]]$estimated_field = evaluation_result$field
-      estimators_list[[i]]$sfd_list = evaluation_result$sfd_list
-    }
-    else{
-      evaluation_result <-  get_gradient_field(data_object, estimators_list[[i]])
-      estimators_list[[i]]$estimated_field = evaluation_result$evaluated_field
-      estimators_list[[i]]$params <- evaluation_result$params
-    }
-    
-    if (TRUE){
-      title_str = title_str = paste("Data Set: ", data_object$name,
-                                    "\nEstimator: ", estimators_list[[i]]$method,
-                                    "\nParams: ", paste(names(estimators_list[[i]]$params),
-                                                        estimators_list[[i]]$params, sep = ":", collapse = "\n"))
-      estimators_list[[i]]$field_plot = ggplot_field(data_object$limit_cycle_tail, data_object$grid$eval_grid, 
-                                                     estimators_list[[i]]$estimated_field, rescale = .025,
-                                                     title=title_str) + theme(text = element_text(size = 4))
-      }
-  }
-  
-  return(estimators_list)
+	for (i in 1:length(data_list)){
+		estimation_results <- evaluate_gradient_single(data_list[[i]], estimator_list)  
+		data_list[[i]]$estimates <- estimation_results
+	}
+	
+	return(data_list)
+	
 }
 
-evaluate_gradient_methods <- function(data_list, estimator_list){
-  for (i in 1:length(data_list)){
-    estimation_results <- evaluate_gradient_single(data_list[[i]], estimator_list)  
-    data_list[[i]]$estimates <- estimation_results
-  }
-  
-  return(data_list)
+#' Evaluate single estimator on single dataset
+#'
+#' @param data_object (list) Data object including samples
+#' @param estimators_list (list of lists) Each sublist is an estimator to apply
+#'
+#' @return estimators_list (list of lists) Input update with fit field and predictor
+#'
+#' @examples
+evaluate_gradient_single <- function(data_object, estimators_list){
 
+	for (i in 1:length(estimators_list)){
+		if (estimators_list[[i]]$method == "truth"){
+			estimators_list[[i]]$params <- data_object$system_params
+			estimators_list[[i]]$params$system_name <- data_object$system_name
+			estimators_list[[i]]$estimated_field <- get_gradient_field(data_object,estimators_list[[i]])$evaluated_field
+		} else if (estimators_list[[i]]$method == "spline"){
+			evaluation_result <- get_gradient_field(data_object, estimators_list[[i]])
+			estimators_list[[i]]$params <- evaluation_result$params
+			estimators_list[[i]]$estimated_field <- evaluation_result$field
+			estimators_list[[i]]$sfd_list <- evaluation_result$sfd_list
+		} else if (estimators_list[[i]]$method == "gd_spline"){
+			evaluation_result <- get_gradient_field(data_object, estimators_list[[i]])
+			estimators_list[[i]]$params <- evaluation_result$params
+			estimators_list[[i]]$estimated_field <- evaluation_result$field
+			estimators_list[[i]]$sfd_list <- evaluation_result$sfd_list
+		} else{
+			evaluation_result <- get_gradient_field(data_object, estimators_list[[i]])
+			estimators_list[[i]]$estimated_field <- evaluation_result$evaluated_field
+			estimators_list[[i]]$params <- evaluation_result$params
+		}
+
+	}
+
+	return(estimators_list)
 }
 
 ###################
@@ -295,6 +341,7 @@ plot_field_delta <- function(plot_specifications, experiment_outcome, sol_paths 
 get_shared_ic <- function(ls_samples, delta_ring = FALSE){
   # samples random ICs from within, on, outside close, and outside far from the LC
   if (!delta_ring){
+    set.seed(20)
     # sample points in a radial fashion, for symmetric LCs
     ic_init_samples <- ls_samples[runif(4, 1, nrow(ls_samples)),c(1,2)]
     ic_radial <- c(0.5, 1, 1.25, 1.4)

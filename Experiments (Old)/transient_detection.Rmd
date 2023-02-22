@@ -1,0 +1,295 @@
+---
+title: "Transient Detection"
+author: "Hooker Lab"
+output: html_document
+---
+
+```{r rmd setup,include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE)
+```
+
+```{r r setup,message=F,cache=F}
+library(here)
+source(here::here("simulation_fns.R"))
+```
+
+# Algorithm
+
+The simple transient detection algorithm starts by calculating the Euclidean distance from the final observation to all other ones. The earliest time index within the closest $x \%$ is chosen as the cutoff between transient and limit cycle. We pick $2\%$ as default. This procedure can use the spline-smoothed position or (currently noiseless) gradient.
+
+```{r get_cutoff_fn,echo=TRUE}
+get_lc_cutoff <- function(full_samples,cutoff_prop=50,gradient=FALSE){
+  
+  # this naive algorithm delineates the limit cycle from transient
+  # it first ranks the nearest neighbors in the entire signal 
+  # the earliest nearest neighbor in the closest `1/cutoff_prop`-fraction
+  # is picked to start the signal 
+  
+  x_var <- ifelse(gradient,"f_x","x")
+  y_var <- ifelse(gradient,"f_y","y")
+  
+  final_observation <- full_samples[nrow(full_samples),c(x_var,y_var)]
+  other_observations <- full_samples[-nrow(full_samples),c(x_var,y_var)]
+  
+  cutoff_index <- min(RANN::nn2(other_observations,final_observation,
+    k=nrow(other_observations))$nn.idx[1:(nrow(other_observations)/cutoff_prop)])
+  
+  return(cutoff_index)
+}
+```
+
+```{r plotting_fns}
+
+get_trajectory_plot <- function(full_samples,transient_cutoff,gradient=FALSE){
+
+  x_var <- ifelse(gradient,"f_x","x")
+  y_var <- ifelse(gradient,"f_y","y")
+
+  # add indicator if in transient cutoff range
+  full_samples_toplot <- full_samples %>% mutate(transient = ifelse(row_number() <= transient_cutoff,"Transient","Limit Cycle"))
+
+  full_traj <- ggplot2::ggplot(full_samples_toplot,aes(x=.data[[x_var]],y=.data[[y_var]])) +
+    geom_point(color = "#FDB515", alpha = 0.7) +
+    facet_wrap(~transient) +
+    labs(x = x_var, y = y_var, title = paste0("Trajectory with Cutoff at ",transient_cutoff, " Samples"))
+
+  return(full_traj)
+}
+
+get_axis_plots <- function(full_samples,transient_cutoff,gradient=FALSE){
+
+  x_var <- ifelse(gradient,"f_x","x")
+  y_var <- ifelse(gradient,"f_y","y")
+
+  full_samples_toplot <- full_samples %>%
+    mutate(index = row_number()) %>%
+    select(!!x_var,!!y_var,index) %>%
+    pivot_longer(-index,names_to="axis",values_to="position")
+
+  axis_plots <- ggplot2::ggplot(full_samples_toplot,aes(x=index,y=position)) +
+    geom_point(alpha=0.7) +
+    geom_vline(xintercept = transient_cutoff, linetype = "longdash")+
+    facet_wrap(~axis) +
+    labs(x = "Sample Index", y = "Position", title = "Projection onto Each Axis")
+
+  return(axis_plots)
+}
+```
+
+
+# Van der Pol Examples
+
+The classic Van der Pol with $\mu = 1.5$ is used to demonstrate robustness to the sampling rate and fraction of closest neighbors considered.
+
+## Default: 100 Hz and Top 0.02
+
+```{r demo_default}
+
+sample_deltaT <- 0.01 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+## 20 Hz and Top 0.02
+
+### Position
+
+```{r}
+
+sample_deltaT <- 0.05 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+### Gradient
+
+```{r}
+
+sample_deltaT <- 0.05 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=T)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=T)
+print(trajectories)
+print(projections)
+```
+
+## 50 Hz and Top 0.02
+
+### 1000 Samples
+
+```{r}
+
+sample_deltaT <- 0.1 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 1000, lc_tail_n = 1000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+### 5000 Samples
+
+```{r}
+
+sample_deltaT <- 0.1 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+## 100 Hz and Top 0.5
+
+```{r}
+
+sample_deltaT <- 0.01 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,
+                              cutoff_prop=2)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+## 100 Hz and Top 0.95
+
+```{r}
+
+sample_deltaT <- 0.01 # inverse of sampling rate
+vdp_data <- list(name = "VDP", system = "van_der_pol", params = list(mu=1.5),
+                              n = 5000, lc_tail_n = 5000, sample_density = sample_deltaT, var_x = 0.05, var_y = 0.05,
+                              x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, 
+                              smoother = "bspline", data_seed = 2, noise_seed = 2)
+experiment_list <- list(vdp_data)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,
+                              cutoff_prop=1.05)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+# Rosenzweig-MacArthur
+
+## 100 Hz and Top 0.02 with Smoothing
+
+### Position
+
+```{r}
+rz_model <- list(name = "RZ", system = "rzma", params = list(a = 2.8, b = 0.7, c = 1.35, r = 3.5, K = 1.4), n = 1000, sample_density = 0.1, var_x = 0.03, var_y = 0.03,
+                    lc_tail_n = 1000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 1, noise_seed = 2)
+experiment_list <- list(rz_model)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,
+                              cutoff_prop=50)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```
+
+
+### Gradient
+
+```{r}
+rz_model <- list(name = "RZ", system = "rzma", params = list(a = 2.8, b = 0.7, c = 1.35, r = 3.5, K = 1.4), n = 1000, sample_density = 0.1, var_x = 0.03, var_y = 0.03,
+                    lc_tail_n = 1000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "bspline", data_seed = 1, noise_seed = 2)
+experiment_list <- list(rz_model)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,
+                              cutoff_prop=50)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=T)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=T)
+print(trajectories)
+print(projections)
+```
+
+
+## 100 Hz and Top 0.02 without Smoothing
+
+```{r}
+rz_model <- list(name = "RZ", system = "rzma", params = list(a = 2.8, b = 0.7, c = 1.35, r = 3.5, K = 1.4), n = 1000, sample_density = 0.1, var_x = 0.03, var_y = 0.03,
+                    lc_tail_n = 1000, x_grid_size = 36, y_grid_size = 36, extrapolation_size = 0.5, smoother = "orig", data_seed = 1, noise_seed = 2)
+experiment_list <- list(rz_model)
+experiment_data <- generate_data_object_model(experiment_list)
+
+cutoff_index <- get_lc_cutoff(experiment_data[[1]]$limit_cycle_samples,
+                              cutoff_prop=50)
+
+full_samples <- experiment_data[[1]]$limit_cycle_samples[,1:4]
+trajectories <- get_trajectory_plot(full_samples,cutoff_index,gradient=F)
+projections <- get_axis_plots(full_samples,cutoff_index,gradient=F)
+print(trajectories)
+print(projections)
+```

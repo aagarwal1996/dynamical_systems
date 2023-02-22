@@ -8,171 +8,67 @@ library(deSolve)
 # Smooth Noisy Data #
 #####################
 
-#' Smooth Noisy Samples
-#' 
-#' This function takes noisy data as an input and returns a smoothed version using splines
-#' If gradient data is not observed, this function can also impute that after smoothing
-#' Additional control is given to the splines through optional parameters
-#'
-#' TODO: Complete
-#' @param orig_data 
-#' @param data 
-#' @param impute_grad 
-#' @param lambda 
-#' @param norder 
-#' @param nbasis 
-#' @param penalty_order 
-#' @param max_t 
-#' @param return_type 
-#' @param title 
-#'
-#' @return
-#' @export
-#'
-#' @examples
-spline_smooth_noisy_samples <- function(orig_data, data, impute_grad = F, 
-                                        lambda = 1e-10, norder = 4, nbasis = 48, penalty_order = 2, max_t = 1,
-                                        return_type = "bspline", title = ""){
-  time_grid <- seq(0,max_t,length.out=nrow(data))
-  penalty.Lfd = int2Lfd(penalty_order)
-  
-  xbasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
-  xbasis.fdPar = fdPar(xbasis,penalty.Lfd,lambda)
-  ybasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
-  ybasis.fdPar = fdPar(ybasis,penalty.Lfd,lambda)
-  
-  # code taken from Giles' tutorial
-  
-  lambdas = 10^seq(-6,4,by=0.25)    # lambdas to look over
-  x.mean.gcv = rep(0,length(lambdas)) # store mean gcv
-  y.mean.gcv = rep(0,length(lambdas))
-  
-  for(ilam in 1:length(lambdas)){
-    # Set lambda
-    xbasis.fdPar_i = xbasis.fdPar
-    xbasis.fdPar_i$lambda = lambdas[ilam]
-    ybasis.fdPar_i = ybasis.fdPar
-    ybasis.fdPar_i$lambda = lambdas[ilam]
-    
-    # Smooth
-    x_smooth_i <- smooth.basis(argvals = seq(0,max_t,len=length(data$x)), y=data$x, fdParobj=xbasis.fdPar_i)
-    y_smooth_i <- smooth.basis(argvals = seq(0,max_t,len=length(data$y)), y=data$y, fdParobj=ybasis.fdPar_i)
-    
-    # Record average gcv
-    x.mean.gcv[ilam] = mean(x_smooth_i$gcv)
-    y.mean.gcv[ilam] = mean(y_smooth_i$gcv)
-  }
-  
-  # We can plot what we have
-  
-  #plot(lambdas,x.mean.gcv,type='b',log='x')
-  #plot(lambdas,y.mean.gcv,type='b',log='x')
-  # Lets select the lowest of these and smooth
-  
-  best_x = which.min(x.mean.gcv)
-  lambdabest_x = lambdas[best_x]
-  best_y = which.min(y.mean.gcv)
-  lambdabest_y = lambdas[best_y]
-  
-  xbasis.fdPar$lambda = lambdabest_x
-  ybasis.fdPar$lambda = lambdabest_y
-  cat("After GCV, Lambda x:", lambdabest_x, " and Lambda y:", lambdabest_y)
-  x_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$x)), y=data$x, fdParobj=xbasis.fdPar)
-  y_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$y)), y=data$y, fdParobj=ybasis.fdPar)
-  
-  smoothed_samples <- cbind(eval.fd(seq(0,max_t,len=length(data$x)),x_smooth$fd),
-                            eval.fd(seq(0,max_t,len=length(data$y)),y_smooth$fd))
-  colnames(smoothed_samples) <- c("x","y")
-  smoothed_samples <- as.data.frame(smoothed_samples)
+spline_smooth_samples <- function(data, impute_grad = F, nbasis = 48, max_t = 1,
+								  lambda = 1e-10, norder = 4, penalty_order = 2,
+								  smooth_type = "bspline"){
+	if (smooth_type == "none"){
+		return(data)
+	}
+	
+	# initialize FDA objects
+	penalty.Lfd = int2Lfd(penalty_order)
+	xbasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
+	xbasis.fdPar = fdPar(xbasis,penalty.Lfd,lambda)
+	ybasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
+	ybasis.fdPar = fdPar(ybasis,penalty.Lfd,lambda)
 
-  verbose = FALSE
-  if (verbose){
-    tps_x <- Tps(time_grid, data$x)$fitted.values
-    tps_y <- Tps(time_grid, data$y)$fitted.values
-    
-    plotting_df <- rbind(tibble(x = orig_data$x, y = orig_data$y, pair = 1:nrow(orig_data), label = "Truth"),
-                         tibble(x = data$x, y = data$y, pair = 1:nrow(orig_data), label = "Noisy Samples"),
-                         tibble(x = smoothed_samples$x, y = smoothed_samples$y, pair = 1:nrow(orig_data), label = "b-Spline"),
-                         tibble(x = tps_x, y = tps_y, pair = 1:nrow(orig_data), label = "TPS"))
-    
-    # plot all smoothers separately
-    smooth_side_by_side <- plotting_df %>%
-      ggplot(aes(x=x, y=y)) +
-      geom_point() +
-      labs(title=paste0(title,"; : ",norder,"; # of b-spline basis: ", nbasis,"; x GCV lambda: ", round(lambdabest_x,2),"; y GCV lambda: ", round(lambdabest_y,2))) +
-      facet_wrap(~label)
-    #print(smooth_side_by_side)
-    file_name = paste0("comparison_",norder,"_",nbasis,"_mu20.png")
-    file_path = paste0("Result_Images/2022-07-18/",file_name)
-    ggsave(file_path,smooth_side_by_side,width=14,height=7)
-    
-    # plot all smoothers together
-    connected_smooth <- plotting_df %>%
-      filter(label != "TPS") %>%
-      ggplot(aes(x=x,y=y, color=label)) +
-      geom_point(aes(fill=label),size=3) +
-      geom_line(aes(group = pair),color="grey")
-    #print(connected_smooth)
-    
-    # visualize derivative of b-spline smooth
-  
-    time_axis_tibble <- rbind(tibble(t=seq(0,max_t,len=length(data$x)),pos=smoothed_samples$x,estimate="b-spline",axis="x"),
-                               tibble(t=seq(0,max_t,len=length(data$x)),pos=orig_data$x,estimate="truth",axis="x"),
-                               tibble(t=seq(0,max_t,len=length(data$x)),pos=data$x,estimate="noisy",axis="x"),
-                               tibble(t=seq(0,max_t,len=length(data$y)),pos=smoothed_samples$y,estimate="b-spline",axis="y"),
-                               tibble(t=seq(0,max_t,len=length(data$y)),pos=orig_data$y,estimate="truth",axis="y"),
-                               tibble(t=seq(0,max_t,len=length(data$y)),pos=data$y,estimate="noisy",axis="y"))
-    b_spline_position_plot <- time_axis_tibble %>%
-      ggplot(aes(x=t, y=pos, color = estimate))+
-      geom_point(data = . %>% filter(estimate %in% c("truth")))+
-      geom_point(data = . %>% filter(estimate %in% c("noisy")))+
-      geom_line(data = . %>% filter(estimate %in% c("b-spline")))+
-      labs(title=paste0("Position; ",title,"; Order: ",norder,"; # of b-spline basis: ", nbasis,"; x GCV lambda: ", round(lambdabest_x,2),"; y GCV lambda: ", round(lambdabest_y,2))) +
-      facet_wrap(~axis, scales = "free")
-    #print(b_spline_position_plot)
-    file_name = paste0("position_",norder,"_",nbasis,"_mu20.png")
-    file_path = paste0("Result_Images/2022-07-18/",file_name)
-    ggsave(file_path,b_spline_position_plot,width=14,height=7)
-  
-    # visualize derivative of b-spline smooth
-    x_basis_deriv <- deriv.fd(x_smooth$fd, 1)
-    x_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$x)), fdobj=x_basis_deriv)
-    y_basis_deriv <- deriv.fd(y_smooth$fd, 1)
-    y_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$y)), fdobj=y_basis_deriv)
-    
-    derivative_tibble <- rbind(tibble(t=seq(0,max_t,len=length(data$x)),grad=x_basis_deriv_eval,estimate="b-spline",axis="x"),
-                               tibble(t=seq(0,max_t,len=length(data$x)),grad=data$f_x,estimate="truth",axis="x"),
-                               tibble(t=seq(0,max_t,len=length(data$y)),grad=y_basis_deriv_eval,estimate="b-spline",axis="y"),
-                               tibble(t=seq(0,max_t,len=length(data$y)),grad=data$f_y,estimate="truth",axis="y"))
-    b_spline_deriv_plot <- derivative_tibble %>%
-      ggplot(aes(x=t, y=grad, color = estimate))+
-      geom_point(data = . %>% filter(estimate %in% c("truth")))+
-      geom_line(data = . %>% filter(estimate %in% c("b-spline")))+
-      labs(title=paste0("Gradient; ",title,"; Order: ",norder,"; # of b-spline basis: ", nbasis,"; x GCV lambda: ", round(lambdabest_x,2),"; y GCV lambda: ", round(lambdabest_y,2))) +
-      facet_wrap(~axis, scales = "free")
-    #print(b_spline_deriv_plot)
-    file_name = paste0("gradient_",norder,"_",nbasis,"_mu20.png")
-    file_path = paste0("Result_Images/2022-07-18/",file_name)
-    ggsave(file_path,b_spline_deriv_plot,width=14,height=7)
-  }
-  
-  if(impute_grad){
-    x_basis_deriv <- deriv.fd(x_smooth$fd, 1)
-    x_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$x)), fdobj=x_basis_deriv)
-    y_basis_deriv <- deriv.fd(y_smooth$fd, 1)
-    y_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$y)), fdobj=y_basis_deriv)
-    
-    smoothed_samples <- smoothed_samples %>% mutate("f_x" = x_basis_deriv_eval, "f_y" = y_basis_deriv_eval)
-  }
-  
-  if (return_type == "bspline"){
-    return(smoothed_samples)
-  } else if (return_type == "tps"){
-    smoothed_samples <- matrix(c(tps_x,tps_y), ncol = 2)
-    return(smoothed_samples)
-  } else {
-    stop("Spline smooth not implemented")
-  }
+	lambdas = 10^seq(-6,4,by=0.25)    # lambdas to look over
+	x.mean.gcv = rep(0,length(lambdas)) # store mean gcv
+	y.mean.gcv = rep(0,length(lambdas))
+
+	for(ilam in 1:length(lambdas)){
+		# Set lambda
+		xbasis.fdPar_i = xbasis.fdPar
+		xbasis.fdPar_i$lambda = lambdas[ilam]
+		ybasis.fdPar_i = ybasis.fdPar
+		ybasis.fdPar_i$lambda = lambdas[ilam]
+
+		# Smooth
+		x_smooth_i <- smooth.basis(argvals = seq(0,max_t,len=length(data$x)), y=data$x, fdParobj=xbasis.fdPar_i)
+		y_smooth_i <- smooth.basis(argvals = seq(0,max_t,len=length(data$y)), y=data$y, fdParobj=ybasis.fdPar_i)
+
+		# Record average gcv
+		x.mean.gcv[ilam] = mean(x_smooth_i$gcv)
+		y.mean.gcv[ilam] = mean(y_smooth_i$gcv)
+	}
+
+	# pick the best smoothing parameters from CV
+	best_x = which.min(x.mean.gcv)
+	lambdabest_x = lambdas[best_x]
+	best_y = which.min(y.mean.gcv)
+	lambdabest_y = lambdas[best_y]
+	xbasis.fdPar$lambda = lambdabest_x
+	ybasis.fdPar$lambda = lambdabest_y
+	
+	x_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$x)), y=data$x, fdParobj=xbasis.fdPar)
+	y_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$y)), y=data$y, fdParobj=ybasis.fdPar)
+	smoothed_samples <- cbind(eval.fd(seq(0,max_t,len=length(data$x)),x_smooth$fd),
+							  eval.fd(seq(0,max_t,len=length(data$y)),y_smooth$fd))
+	colnames(smoothed_samples) <- c("x","y")
+	smoothed_samples <- as.data.frame(smoothed_samples)
+
+	if(impute_grad){
+		x_basis_deriv <- deriv.fd(x_smooth$fd, 1)
+		x_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$x)), fdobj=x_basis_deriv)
+		y_basis_deriv <- deriv.fd(y_smooth$fd, 1)
+		y_basis_deriv_eval <- eval.fd(evalarg = seq(0,max_t,len=length(data$y)), fdobj=y_basis_deriv)
+		smoothed_samples <- smoothed_samples %>% mutate("f_x" = x_basis_deriv_eval, "f_y" = y_basis_deriv_eval)
+	} else{
+		smoothed_samples$f_x <- data$f_x
+		smoothed_samples$f_y <- data$f_y
+	}
+
+	return(smoothed_samples)
 }
 
 ########################
@@ -279,7 +175,7 @@ generate_lv_samples <- function(system_params, num_samples = 1500, sample_densit
   
 }
 
-eval_lv_gradient <- function(t, v, system_params, list = F){
+eval_lv_gradient <- function(t, v, system_params){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
@@ -313,7 +209,7 @@ generate_log_lv_samples <- function(system_params, num_samples = 1500, sample_de
   
 }
 
-eval_log_lv_gradient <- function(t, v, system_params, list = F){
+eval_log_lv_gradient <- function(t, v, system_params){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
@@ -341,16 +237,20 @@ generate_rzma_samples <- function(system_params, num_samples = 1500, sample_dens
   names(initial_condition) <- c('x','y')
   
   # compute the prediction and its gradient at each sample
-  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_gause_gradient, system_params))
-  derivative_evals <- t(apply(traj[,2:3], 1, eval_gause_gradient, t = 0, params = system_params, list = T))
+  traj <- data.frame(deSolve::lsoda(initial_condition,seq(0,num_samples*sample_density,by=sample_density), eval_rzma_gradient, system_params))
+  
+  derivative_evals <- matrix(
+    unlist(apply(traj[,2:3], 1, eval_rzma_gradient, t = 0, params = system_params),use.names=F),
+    ncol=(ncol(traj)-1),byrow=T)
+  #t(apply(traj[,2:3], 1, eval_rzma_gradient, t = 0, params = system_params))
   traj['f_x'] <- derivative_evals[,1] 
   traj['f_y'] <- derivative_evals[,2]
-  View(traj)
+  
   return(traj[,-1])
   
 }
 
-eval_rzma_gradient <- function(t, v, params, list = F){
+eval_rzma_gradient <- function(t, v, params){
   # helper function to evaluate gradient of van der pol at point v = (x,y)
   x <- v[1]
   y <- v[2]
@@ -359,7 +259,7 @@ eval_rzma_gradient <- function(t, v, params, list = F){
   phi <- params$a / (params$b + x)
   
   dx <- x*f_x - y*phi*x
-  dy <- y*(-params$c + params$k*x*phi)
+  dy <- y*(-params$c + params$K*x*phi)
 
   return(list(as.vector(c(dx,dy))))
 }
@@ -591,7 +491,7 @@ get_gradient_field <- function(data, estimator){
     return(return_list)
   }
   else if (estimator$method == "truth"){
-    evaluated_field <- generate_true_grid_data(data$system, data$params, grid$eval_grid)
+    evaluated_field <- generate_true_grid_data(data$system_name, data$system_params, grid$eval_grid)
   }
   else if (estimator$method == "knn"){
     evaluated_field <- eval_knn_fit(grid$eval_grid, as.matrix(data$limit_cycle_tail), estimator$params$k)
@@ -624,8 +524,8 @@ generate_solution_path <- function(data, estimator, initial_condition){
       evaluated_field <- generate_true_path_lv(data, estimator$params, initial_condition) 
     } else if (estimator$params$name == "log_lotka_volterra") {
       evaluated_field <- generate_true_path_log_lv(data, estimator$params, initial_condition) 
-    } else if (estimator$params$name == "gause") {
-      evaluated_field <- generate_true_path_gause(data, estimator$params, initial_condition)
+    } else if (estimator$params$name == "rzma") {
+      evaluated_field <- generate_true_path_rzma(data, estimator$params, initial_condition)
     }
   } else if (estimator$method == "knn"){
     evaluated_field <- generate_knn_path(data, estimator, initial_condition)
@@ -638,4 +538,21 @@ generate_solution_path <- function(data, estimator, initial_condition){
   }
   
   return(evaluated_field)
+}
+
+return_true_gradient_fn <- function(system_name){
+
+	if (system_name == "van_der_pol"){
+		gradient_fn <- eval_van_der_pol_gradient
+	} else if (system_name == "lotka_volterra") {
+		gradient_fn <- eval_lv_gradient
+	} else if (system_name == "log_lotka_volterra") {
+		gradient_fn <- eval_log_lv_gradient
+	} else if (system_name == "rzma") {
+		gradient_fn <- eval_rzma_gradient
+	} else {
+		stop('Error: True gradient not available for the ', estimator_object$method, ' system')
+	}
+
+	return(gradient_fn)
 }

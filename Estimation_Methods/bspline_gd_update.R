@@ -1,12 +1,11 @@
-source(here::here("estimation_methods","bspline.R"))
-
+source(here::here("fit_helpers.R"))
 library(MASS)
 
 # new implementation. only supports stochastic batching, with and without a check of eigenvectors
-calculate_gd_spline_gradient_field <- function(data, x_grid, y_grid, gd_params, side_info = list(), 
+calculate_gd_spline_gradient_field <- function(data, gd_params, side_info = list(), 
                                                norder = 6, nbasis = 24, penalty_order = 2, lambda = 1e-8){
-  init_spline_fit <- calculate_spline_gradient_field(data,x_grid, y_grid,side_info=side_info,
-                                                     norder=norder,nbasis=nbasis,penalty_order=penalty_order,lambda=lambda)
+  init_spline_fit <- fit_vanilla_spline_field(data,side_info=side_info,
+    norder=norder,nbasis=nbasis,penalty_order=penalty_order,lambda=lambda)
   # radius for delta-tube evaluation points. radius = 0 uses samples instead
   if (!(gd_params$dt_radius == 0)){           
     gd_points <- get_gd_delta_tube(data, radius = gd_params$dt_radius)
@@ -17,20 +16,10 @@ calculate_gd_spline_gradient_field <- function(data, x_grid, y_grid, gd_params, 
   gd_update_results <- batch_jacobian_gd(gd_points, gd_params$eig_rank, init_spline_fit$fdx, init_spline_fit$fdy,
                                             gd_params$batching, gd_params$eta, gd_params$algorithm)
 
-  gd_spline_grid_x <- eval.bifd(x_grid,y_grid,gd_update_results$fdx)
-  gd_spline_grid_y <- eval.bifd(x_grid,y_grid,gd_update_results$fdy)
-  
-  # return as |Grid| x 2 matrix
-  spline_field <- matrix(c(c(gd_spline_grid_x),c(gd_spline_grid_y)),ncol=2)
-  
-  gd_params$batching$algorithm <- gd_params$algorithm
-  analyze_gd_convergence(gd_points, gd_params$batching, gd_update_results, 
-                         list(x=x_grid, y=y_grid),
-                         list(x=init_spline_fit$fdx,y=init_spline_fit$fdy),
-                         gd_update_results$basis_info) # fda objects
 
-  return(list(field = spline_field, fdx = gd_update_results$fdx, fdy = gd_update_results$fdy, 
-              gd_log = gd_update_results$batch_results))
+  #gd_params$batching$algorithm <- gd_params$algorithm
+  #gd_log = gd_update_results$batch_results
+  return( list(fdx = gd_update_results$fdx, fdy = gd_update_results$fdy) )
 }
 
 batch_jacobian_gd <- function(gd_data, eig_rank, init_fdx, init_fdy, batch_params, eta, algorithm){
