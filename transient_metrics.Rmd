@@ -1,0 +1,40 @@
+---
+title: "Trajectory Loss Comparison"
+author: "William Torous"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("transient_metrics.R")
+```
+
+In this notebook we explore different loss functions between true and estimated solution trajectories.
+
+# Loss Metrics
+
+# Van der Pol Examples
+
+```{r create_vdp_1}
+estimator_list <- list(
+ 	list(method="truth"),
+ 	list(method="gd_spline",side_info=list(),norder=6,nbasis=36,penalty_order=2,lambda=1e-2,
+ 		 gd_params = list(algorithm="Vanilla",eig_rank=1,eta=0.02,dt_radius=0.2,
+ 		 				 batching=list(num_iterations=1,batches_per=25,batch_size=1,skip_negative=T))),
+ 	list(method="vanilla_spline",side_info=list(),norder=6,nbasis=36,penalty_order=2,lambda=1e-2),
+ 	list(method="nw",bandwidth_matrix = 0.25*diag(2))
+)
+
+vdp_trial <- generate_experiment_trial("example_vdp", system_name = "van_der_pol", system_parameters = list(mu=5),
+									   random_seed = 31, num_samples = 5000, delta_t = 0.01,
+									   replicates = 1, var_x = 0.05, var_y = 0.05)
+vdp_trial_smooth <- smooth_trial(vdp_trial)
+vdp_trial_fit <- apply_estimators(vdp_trial_smooth,estimator_list)
+```
+
+```{r plot_vdp_1}
+initial_conditons <-  sample_ic(vdp_trial_fit$replicates[[1]]$smooth_tail, c(2,2,2), c(0.5,1,1.5), 1)
+losses <- c(NA)
+build_scorecard(vdp_trial_fit$replicates[[1]],initial_conditions,estimators,losses)
+```

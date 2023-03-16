@@ -40,11 +40,11 @@ t_star <- get_lc_cutoff(vdp_trial_fit$replicates[[1]]$smooth)
 
 ic <- sample_ic(vdp_trial_fit$replicates[[1]]$smooth_tail, c(1), c(1.3), 0)
 calc_transient_error(ic, vdp_trial_fit$replicates[[1]]$estimators[[1]]$fn, 
-					vdp_trial_fit$replicates[[1]]$estimators[[2]]$fn, t_star, 1000, plot = TRUE,int_pred=TRUE)
+					vdp_trial_fit$replicates[[1]]$estimators[[2]]$fn, t_star, 1000, loss_fn = "squared_model", plot = TRUE)
 calc_transient_error(ic, vdp_trial_fit$replicates[[1]]$estimators[[1]]$fn, 
-					 vdp_trial_fit$replicates[[1]]$estimators[[3]]$fn, t_star, 1000, plot = TRUE)
+					 vdp_trial_fit$replicates[[1]]$estimators[[3]]$fn, t_star, 1000, loss_fn = "squared_estimator", plot = TRUE)
 calc_transient_error(ic, vdp_trial_fit$replicates[[1]]$estimators[[1]]$fn, 
-					 vdp_trial_fit$replicates[[1]]$estimators[[4]]$fn, t_star, 1000, plot = TRUE,int_pred=TRUE)
+					 vdp_trial_fit$replicates[[1]]$estimators[[4]]$fn, t_star, 1000, loss_fn = "squared_model", plot = TRUE)
 
 # start.time <- proc.time()[3]
 # j <- apply_transient_error(vdp_trial_fit,c(1,1),c(.9,1.1),0,NULL,100)

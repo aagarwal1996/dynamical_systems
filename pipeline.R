@@ -246,7 +246,7 @@ apply_transient_error <- function(experiment_trial,
 	}
 }
 
-calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star, N, plot = FALSE, int_pred = FALSE){
+calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star, N, losses, plot = FALSE, return_transients = FALSE){
 	# Step 1: Fit estimated transient from initial condition
 	time_vec.true <- seq(0,t_star,length.out=N)
 	true_grad_augment <- function(t,v,parms){return(true_grad(v))} # play nice with deSolve
@@ -255,6 +255,7 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 		true_transient <- matrix(c(true_transient),nrow=1,dimnames=list(NULL,names(true_transient)))
 		true_transient <- cbind(true_transient,source = 1)
 	} else {true_transient <- cbind(true_transient,source = 1)}
+	true_transient_true_grad <- matrix(unlist(apply(true_transient,1,function(row){true_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 	
 	time_vec.est <- seq(0,10*t_star,length.out=10*N) # solve for too long
 	est_grad_augment <- function(t,v,parms){return(est_grad(v))}
@@ -265,18 +266,42 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 		est_transient <- matrix(c(est_transient),nrow=1,dimnames=list(NULL,names(est_transient)))
 		est_transient <- cbind(est_transient,source = 2)
 	} else {est_transient <- cbind(est_transient,source = 2)}
+	est_transient_est_grad <- matrix(unlist(apply(est_transient,1,function(row){est_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 	
 	# Step 2: Calculate mean nearest-neighbor distance
-	if (!int_pred){
-		squared_distances <- (RANN::nn2(matrix(est_transient[,c("x","y")],ncol=2),
+	computed_losses <- c()
+	if ("squared_model" %in% losses){
+		distances <- (RANN::nn2(matrix(est_transient[,c("x","y")],ncol=2),
 										matrix(true_transient[,c("x","y")],ncol=2),
 										k=1)$nn.dists)^2
-	} else {
-		squared_distances <- (RANN::nn2(matrix(true_transient[,c("x","y")],ncol=2),
+		transient_mse <- apply(distances,2,mean)
+		computed_losses <- c(computed_losses, c("squared_model" = transient_mse))
+	}
+	if ("squared_estimator" %in% losses){
+		distances <- (RANN::nn2(matrix(true_transient[,c("x","y")],ncol=2),
 										matrix(est_transient[,c("x","y")],ncol=2),
 										k=1)$nn.dists)^2
+		transient_mse <- apply(distances,2,mean)
+		computed_losses <- c(computed_losses, c("squared_estimator" = transient_mse))
 	}
-	transient_mse <- apply(squared_distances,2,mean)
+	if ("trig_model" %in% losses){
+		true_transient_est_grad <- matrix(unlist(apply(true_transient,1,function(row){est_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
+		true_transient_grad_mat <- cbind(true_transient_true_grad,true_transient_est_grad)
+		distances <- apply(true_transient_grad_mat,1,function(row){
+			sin(acos((row[1]*row[3] + row[2]*row[4]) / (sqrt(row[1]^2 + row[2]^2)*sqrt(row[3]^2 + row[4]^2)) )/2 )
+		})
+		transient_mse <- mean(distances, na.rm = TRUE)
+		computed_losses <- c(computed_losses, c("trig_model" = transient_mse))
+	}
+	if ("trig_estimator" %in% losses){
+		est_transient_true_grad <- matrix(unlist(apply(est_transient,1,function(row){true_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
+		est_transient_grad_mat <- cbind(est_transient_true_grad,est_transient_est_grad)
+		distances <- apply(est_transient_grad_mat,1,function(row){
+			sin(acos((row[1]*row[3] + row[2]*row[4]) / (sqrt(row[1]^2 + row[2]^2)*sqrt(row[3]^2 + row[4]^2)) )/2 )
+		})
+		transient_mse <- mean(distances, na.rm = TRUE)
+		computed_losses <- c(computed_losses, c("trig_estimator" = transient_mse))
+	}
 
 	# Step 3: Diagnostics
 	if (plot){
@@ -288,8 +313,17 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 			labs(title="Transient")
 		print(transient_plot)
 	}
-
-	return(transient_mse)
+	
+	if (return_transients){
+		true_transient <- cbind(true_transient, true_transient_true_grad)
+		est_transient <- cbind(est_transient, est_transient_est_grad)
+		output_list <- list(losses = computed_losses,
+							true_transient = true_transient,
+							est_transient = est_transient
+							)
+		return(output_list)
+	}
+	return(computed_losses)
 }
 
 sample_ic <- function(data, counts, radial_vec, sigma, filter_fn = NULL, plot = FALSE){
