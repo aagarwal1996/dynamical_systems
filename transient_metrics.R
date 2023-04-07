@@ -51,7 +51,7 @@ build_scorecard <- function(data_object,initial_conditions,t_star,true_grad,esti
 	 	geom_point(aes(shape=Estimator,color=IC)) +
 	 	geom_path(aes(linetype=Estimator,color=IC)) +
 	 	geom_point(data = as_tibble(initial_conditions), aes(x=x, y=y), color = "red", size = 3) + 
-	 	geom_point(data = as_tibble(data_object$smooth_tail), aes(x = x, y = y), color = "#FDB515", alpha = 0.3) +
+	 	geom_point(data = as_tibble(data_object$smooth), aes(x = x, y = y), color = "#FDB515", alpha = 0.3) +
 	 	labs(title=title_str)
 	
 	mytheme <- gridExtra::ttheme_default(

@@ -3,7 +3,8 @@
 .RData
 .Ruserdata
 Result_Images/
-Saved_Data/*
+Saved_Data/
+gait/gait_data/
 !Saved_Data/Abhi/
 .png
 .jpg

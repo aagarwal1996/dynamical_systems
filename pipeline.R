@@ -30,9 +30,11 @@ generate_experiment_trial <- function(experiment_name, system_name = NULL, syste
 	# generate noisy samples
 	if (is.numeric(random_seed)){ set.seed(random_seed) }
 	trial_object$replicates <- list()
-	for (i in 1:replicates){
-		trial_object$replicates[[i]] <- list(samples = generate_limit_cycle_data(system_name, system_parameters,
-											var_x, var_y, num_samples, delta_t))
+	if (replicates > 0){
+		for (i in 1:replicates){
+			trial_object$replicates[[i]] <- list(samples = generate_limit_cycle_data(system_name, system_parameters,
+																					 var_x, var_y, num_samples, delta_t))
+		}
 	}
 
 	return(trial_object)
