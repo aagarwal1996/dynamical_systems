@@ -19,7 +19,7 @@ younger_tibble <- read_table("gait/gait_data/WBDSascii/WBDS21walkT08ang.txt") %>
 older_tibble <- read_table("gait/gait_data/WBDSascii/WBDS42walkT08ang.txt") %>% mutate(unit="older")
 full_tibble <- rbind(younger_tibble, older_tibble) %>% mutate(unit = as.factor(unit))
 
-x_covar = 'LHipAngleZ'
+x_covar = 'RHipAngleZ'
 y_covar = 'LKneeAngleZ'
 
 younger_samples <- younger_tibble %>% select(x = !!x_covar, y = !!y_covar) %>% mutate(f_x = 0, f_y = 0)
@@ -28,7 +28,7 @@ younger_object$replicates <- list(list(samples=younger_samples))
 younger_object <- smooth_trial(younger_object, impute_grad=TRUE)
 younger_object <- apply_estimators(younger_object,estimator_list)
 
-initial_conditions <-  sample_ic(younger_object$replicates[[1]]$smooth, c(2,2,2), c(0.9,1,1.1), 1)
+initial_conditions <-  sample_ic(younger_object$replicates[[1]]$smooth, c(2,0,0), c(0.9,1,1.1), 1)
 losses <- c("squared_model","squared_estimator", "trig_model", "trig_estimator")
 t_star <- get_lc_cutoff(younger_object$replicates[[1]]$smooth)
 build_scorecard(younger_object$replicates[[1]],initial_conditions,t_star,1,c(1,2,3),losses, N = 1000, title_str = "Scorecard for Younger Knee Cohort")

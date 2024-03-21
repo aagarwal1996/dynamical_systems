@@ -110,6 +110,32 @@ bifd_spline_gradient <- function(t,x,params){
 	return(list(as.vector(c(dx,dy))))
 }
 
+bifd_spline_jacobian <- function(t,x,params){
+	sfd_x = params$fdx
+	sfd_y = params$fdy
+
+	# Assumes same basis functions for x and y fit
+	xbasis.eval = eval.basis(x[1],sfd_x$sbasis)
+	ybasis.eval = eval.basis(x[2],sfd_x$tbasis)
+	xbasis.deriv = eval.basis(x[1],sfd_x$sbasis, Lfdobj = 1)
+	ybasis.deriv = eval.basis(x[2],sfd_x$tbasis, Lfdobj = 1) 
+	basis_list = list(x0 = xbasis.eval, y0 = ybasis.eval, x1 = xbasis.deriv, y1 = ybasis.deriv)
+	
+	x_y_matrix <- outer(basis_list$x0[1,],basis_list$y0[1,])
+	dx_y_matrix <- outer(basis_list$x1[1,],basis_list$y0[1,])
+	x_dy_matrix <- outer(basis_list$x0[1,], basis_list$y1[1,])
+	x_y_vec <- c(x_y_matrix)
+	dx_y_vec <- c(dx_y_matrix)
+	x_dy_vec <- c(x_dy_matrix)
+	x_coefs <- c(sfd_x$coefs)
+	y_coefs <- c(sfd_y$coefs)
+	
+	# get eigen-stuff from the original Jacobian
+	jacobian <- matrix(c(x_coefs%*%c(dx_y_matrix),y_coefs%*%c(dx_y_matrix),x_coefs%*%c(x_dy_matrix),y_coefs%*%c(x_dy_matrix)),nrow=2)
+	
+	return(jacobian)
+}
+
 nw_get_grad <- function(t,y,params){
 	# helper function to get nw gradient in deSolve::lsoda
 	data <- params[[1]]

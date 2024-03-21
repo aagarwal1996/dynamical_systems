@@ -8,9 +8,8 @@ library(deSolve)
 # Smooth Noisy Data #
 #####################
 
-spline_smooth_samples <- function(data, impute_grad = F, nbasis = 48, max_t = 1,
-								  lambda = 1e-10, norder = 4, penalty_order = 2,
-								  smooth_type = "bspline"){
+spline_smooth_samples <- function(data, impute_grad = F, nbasis = 48, norder = 6,
+								  penalty_order = 2, max_t = 1, smooth_type = "bspline"){
 	if (smooth_type == "none"){
 		return(data)
 	}
@@ -18,11 +17,11 @@ spline_smooth_samples <- function(data, impute_grad = F, nbasis = 48, max_t = 1,
 	# initialize FDA objects
 	penalty.Lfd = int2Lfd(penalty_order)
 	xbasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
-	xbasis.fdPar = fdPar(xbasis,penalty.Lfd,lambda)
+	xbasis.fdPar = fdPar(xbasis, penalty.Lfd, 1)
 	ybasis = create.bspline.basis(rangeval=c(0,max_t),norder=norder,nbasis=nbasis)
-	ybasis.fdPar = fdPar(ybasis,penalty.Lfd,lambda)
+	ybasis.fdPar = fdPar(ybasis, penalty.Lfd, 1)
 
-	lambdas = 10^seq(-6,4,by=0.25)    # lambdas to look over
+	lambdas = 10^seq(-6,4,by=0.1)    # lambdas to look over
 	x.mean.gcv = rep(0,length(lambdas)) # store mean gcv
 	y.mean.gcv = rep(0,length(lambdas))
 
@@ -49,7 +48,8 @@ spline_smooth_samples <- function(data, impute_grad = F, nbasis = 48, max_t = 1,
 	lambdabest_y = lambdas[best_y]
 	xbasis.fdPar$lambda = lambdabest_x
 	ybasis.fdPar$lambda = lambdabest_y
-	
+
+	# fit data with selected lambda
 	x_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$x)), y=data$x, fdParobj=xbasis.fdPar)
 	y_smooth <- smooth.basis(argvals = seq(0,max_t,len=length(data$y)), y=data$y, fdParobj=ybasis.fdPar)
 	smoothed_samples <- cbind(eval.fd(seq(0,max_t,len=length(data$x)),x_smooth$fd),

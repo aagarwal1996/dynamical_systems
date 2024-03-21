@@ -6,6 +6,7 @@
 library(fda)
 library(tidyverse)
 library(paletteer)
+library(ggplot2)
 
 # Local Files
 # functions to generate data from specific system
@@ -30,11 +31,9 @@ generate_experiment_trial <- function(experiment_name, system_name = NULL, syste
 	# generate noisy samples
 	if (is.numeric(random_seed)){ set.seed(random_seed) }
 	trial_object$replicates <- list()
-	if (replicates > 0){
-		for (i in 1:replicates){
-			trial_object$replicates[[i]] <- list(samples = generate_limit_cycle_data(system_name, system_parameters,
-																					 var_x, var_y, num_samples, delta_t))
-		}
+	for (i in seq_len(replicates)){
+		trial_object$replicates[[i]] <- list(samples = 
+			generate_limit_cycle_data(system_name, system_parameters, var_x, var_y, num_samples, delta_t))
 	}
 
 	return(trial_object)
@@ -74,10 +73,10 @@ smooth_trial <- function(experiment_trial, smooth = "bspline",
 						 smooth_lambda = 1e-12, num_basis_fn = 48, impute_grad = FALSE){
 	for (i in 1:length(experiment_trial$replicates)){
 		# specify smooth = "none" to fit estimators to original data downstream
+		# note `smooth_lambda`
 		experiment_trial$replicates[[i]]$smooth <- spline_smooth_samples(experiment_trial$replicates[[i]]$samples,
-													impute_grad, num_basis_fn, max_t = 1,
-													smooth_lambda, norder = 6, penalty_order = 2,
-													smooth_type = smooth)
+													impute_grad = impute_grad, nbasis = num_basis_fn, norder = 6,
+													penalty_order = 2, max_t = 1, smooth_type = smooth)
 		# TODO: Detect tail automatically
 		n_samples <- dim(experiment_trial$replicates[[i]]$samples)[1]
 		experiment_trial$replicates[[i]]$smooth_tail <- tail(experiment_trial$replicates[[i]]$smooth, 0.7*n_samples)
@@ -95,16 +94,19 @@ apply_estimators <- function(experiment_trial, estimators_list){
 		experiment_trial$replicates[[i]]$estimators <- list()
 		for (j in 1:length(estimators_list)){
 			estimator <- estimators_list[[j]]
-			field_fn <- get_field_fn(experiment_trial$replicates[[i]]$smooth_tail, estimator,
+			vec_fns <- get_vec_fns(experiment_trial$replicates[[i]]$smooth_tail, estimator,
 										experiment_trial$system_name, experiment_trial$system_parameters)
-			experiment_trial$replicates[[i]]$estimators[[j]] <- list(estimator = estimator, fn = field_fn)
+			field_fn <- vec_fns$field
+			jacobian_fn <- vec_fns$jacobian
+			experiment_trial$replicates[[i]]$estimators[[j]] <- list(estimator = estimator, fn = field_fn, jacobian = jacobian_fn)
 		}
 	}
 	return(experiment_trial)
 }
 
-get_field_fn <- function(data, estimator, sys_name, sys_params){
+get_vec_fns <- function(data, estimator, sys_name, sys_params){
 	field_fn <- NA
+	jacobian_fn <- NA
 	if (estimator$method == "truth"){
 		if(sys_name == "van_der_pol"){
 			field_fn <- function(v){ eval_van_der_pol_gradient(0,v,sys_params) }
@@ -122,10 +124,12 @@ get_field_fn <- function(data, estimator, sys_name, sys_params){
 		fda_fit <- fit_vanilla_spline_field(data, estimator$side_info, estimator$norder,
 			estimator$nbasis,estimator$penalty_order,estimator$lambda)
 		field_fn <- function(v){ return(bifd_spline_gradient(0,v,fda_fit)) }
+		jacobian_fn <- function(v){ return(bifd_spline_jacobian(0,v,fda_fit)) }
 	} else if (estimator$method == "gd_spline"){
 		gd_fit <- calculate_gd_spline_gradient_field(data, estimator$gd_params, estimator$side_info,
 													 estimator$norder,estimator$nbasis,estimator$penalty_order,estimator$lambda)
 		field_fn <- function(v){ return(bifd_spline_gradient(0,v,gd_fit)) }
+		jacobian_fn <- function(v){ return(bifd_spline_jacobian(0,v,gd_fit)) }
 	} else if (estimator$method == "nw"){
 		nw_params <- list(data, estimator$bandwidth_matrix)
 		field_fn <- function(v){ return(nw_get_grad(0,v,nw_params)) }
@@ -136,7 +140,7 @@ get_field_fn <- function(data, estimator, sys_name, sys_params){
 		knn_params <- list(data, estimator$k)
 		field_fn <- function(v){ return(knn_get_grad(0,v,knn_params)) }
 	} else{ warning("Invalid estimator specified.") }
-	return(field_fn)
+	return(list(field=field_fn,jacobian=jacobian_fn))
 }
 
 ##############
@@ -227,7 +231,71 @@ get_normal_vectors <- function(sample, radius){
 
 # Solution Path Integral
 
+## Helper Functions
+
+sample_ic <- function(data, counts, radial_vec, sigma, filter_fn = NULL, plot = FALSE){
+	# verify length of radii matches counts
+	stopifnot(length(counts)==length(radial_vec))
 	
+	position_data <- data[,c("x","y")]
+	center <- apply(position_data,2,mean)
+	position_data.centered <- sweep(position_data,2,center,FUN="-")
+	
+	sampled_points <- position_data.centered[sample(1:nrow(position_data.centered),sum(counts),replace=TRUE),]
+	radii <- rep(radial_vec,counts)
+	# add some Gaussian noise to the radius if not equal to 1
+	radii[-which(radii==1)] <- radii[-which(radii==1)] + rnorm(length(radii[-which(radii==1)]),sd=sigma)
+	initial_conditions <- sweep(sampled_points*radii,2,center,FUN="+")
+	
+	# apply condition filtering if applicable
+	if(!is.null(filter_fn)){
+		filter_mask <-apply(initial_conditions,1,filter_fn)
+		orig_n <- nrow(initial_conditions)
+		initial_conditions <- initial_conditions[filter_mask,]
+		if(nrow(initial_conditions) != orig_n){
+			warning(paste0(orig_n - nrow(initial_conditions), " initial conditions filtered. ",
+						   nrow(initial_conditions), " remaining."))
+		}
+	}
+	
+	if (plot){
+		ic_plot <- ggplot(position_data, aes(x=x, y=y)) +
+			geom_point(color = "#FDB515",alpha=0.15) +
+			geom_point(data = initial_conditions, aes(x=x,y=y),color = "#ADC900") +
+			labs(title="Initial Conditions")
+		print(ic_plot)
+	}
+	
+	initial_conditions <- apply(initial_conditions,2,as.numeric) # play nice with deSolve
+	return(initial_conditions)
+}
+
+get_lc_cutoff <- function(full_samples,epsilon=NULL,gradient=FALSE, new_method = TRUE){
+	# this naive algorithm delineates the limit cycle from transient
+	# it places a nearest neighbor ball around the final sample and starts
+	#   the signal at the earliest observation within that ball 
+	if (!new_method){
+		x_var <- ifelse(gradient,"f_x","x")
+		y_var <- ifelse(gradient,"f_y","y")
+		
+		final_observation <- full_samples[nrow(full_samples),c(x_var,y_var)]
+		if(is.null(nrow(final_observation))){final_observation <- matrix(final_observation,ncol=length(final_observation))}
+		other_observations <- full_samples[-nrow(full_samples),c(x_var,y_var)]
+		if(is.null(nrow(other_observations))){other_observations <- matrix(other_observations,ncol=length(other_observations))}
+		
+		cutoff_index <- min(RANN::nn2(other_observations,final_observation,
+									  k=nrow(other_observations))$nn.idx[1:(nrow(other_observations)/50)])
+		
+		if (cutoff_index == nrow(full_samples)){warning("No transient cutoff found. This system may be unstable.")}
+		return(cutoff_index)
+	} else{
+		cutoff_index <- 0.5*nrow(full_samples)
+		return(cutoff_index)
+	}
+}
+
+## Transient Evaluation
+
 apply_transient_error <- function(experiment_trial,
 								  ic_counts, ic_radii, ic_sigma, ic_filter_fn,
 								  integral_N){
@@ -259,7 +327,7 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 	} else {true_transient <- cbind(true_transient,source = 1)}
 	true_transient_true_grad <- matrix(unlist(apply(true_transient,1,function(row){true_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 	
-	time_vec.est <- seq(0,10*t_star,length.out=10*N) # solve for too long
+	time_vec.est <- seq(0,5*t_star,length.out=5*N) # solve for too long
 	est_grad_augment <- function(t,v,parms){return(est_grad(v))}
 	estimated_path <- deSolve::lsoda(initial_condition, time_vec.est, est_grad_augment)
 	est_transient.cutoff <- get_lc_cutoff(estimated_path)
@@ -299,7 +367,7 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 		est_transient_true_grad <- matrix(unlist(apply(est_transient,1,function(row){true_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 		est_transient_grad_mat <- cbind(est_transient_true_grad,est_transient_est_grad)
 		distances <- apply(est_transient_grad_mat,1,function(row){
-			sin(acos((row[1]*row[3] + row[2]*row[4]) / (sqrt(row[1]^2 + row[2]^2)*sqrt(row[3]^2 + row[4]^2)) )/2 )
+			acos((row[1]*row[3] + row[2]*row[4]) / (sqrt(row[1]^2 + row[2]^2)*sqrt(row[3]^2 + row[4]^2)) )
 		})
 		transient_mse <- mean(distances, na.rm = TRUE)
 		computed_losses <- c(computed_losses, c("trig_estimator" = transient_mse))
@@ -328,60 +396,94 @@ calc_transient_error <- function(initial_condition, true_grad, est_grad, t_star,
 	return(computed_losses)
 }
 
-sample_ic <- function(data, counts, radial_vec, sigma, filter_fn = NULL, plot = FALSE){
-	# verify length of radii matches counts
-	stopifnot(length(counts)==length(radial_vec))
+## Limit Cycle Evaluation
 
-	position_data <- data[,c("x","y")]
-	center <- apply(position_data,2,mean)
-	position_data.centered <- sweep(position_data,2,center,FUN="-")
-	
-	sampled_points <- position_data.centered[sample(1:nrow(position_data.centered),sum(counts),replace=TRUE),]
-	radii <- rep(radial_vec,counts)
-	# add some Gaussian noise to the radius if not equal to 1
-	radii[-which(radii==1)] <- radii[-which(radii==1)] + rnorm(length(radii[-which(radii==1)]),sd=sigma)
-	initial_conditions <- sweep(sampled_points*radii,2,center,FUN="+")
-	
-	# apply condition filtering if applicable
-	if(!is.null(filter_fn)){
-		filter_mask <-apply(initial_conditions,1,filter_fn)
-		orig_n <- nrow(initial_conditions)
-		initial_conditions <- initial_conditions[filter_mask,]
-		if(nrow(initial_conditions) != orig_n){
-			warning(paste0(orig_n - nrow(initial_conditions), " initial conditions filtered. ",
-						   nrow(initial_conditions), " remaining."))
+apply_lc_error <- function(experiment_trial,
+						   ic_counts, ic_radii, ic_sigma, ic_filter_fn, integral_N){
+	# for each estimator and replicate, get the integrated error
+	# IMPORTANT: This implicitly assumes for all relative errors that the truth is the first estimator
+	for (i in 1:length(experiment_trial$replicates)){
+		experiment_trial$replicates[[i]]$ic <- sample_ic(experiment_trial$replicates[[i]]$smooth_tail,
+														 ic_counts, ic_radii, ic_sigma, filter_fn=ic_filter_fn)
+		estimators_list <- experiment_trial$replicates[[i]]$estimators
+		for (j in 1:length(estimators_list)){
+			t_star <- get_lc_cutoff(experiment_trial$replicates[[i]]$smooth)
+			experiment_trial$replicates[[i]]$estimators[[j]]$transient_mse <- apply(
+				experiment_trial$replicates[[i]]$ic, 1,  calc_lc_error,
+				experiment_trial$replicates[[i]]$estimators[[1]]$fn,
+				experiment_trial$replicates[[i]]$estimators[[j]]$fn,
+				t_star, integral_N)
 		}
 	}
-
-	if (plot){
-		ic_plot <- ggplot(position_data, aes(x=x, y=y)) +
-			geom_point(color = "#FDB515",alpha=0.15) +
-			geom_point(data = initial_conditions, aes(x=x,y=y),color = "#ADC900") +
-			labs(title="Initial Conditions")
-		print(ic_plot)
-	}
-
-	initial_conditions <- apply(initial_conditions,2,as.numeric) # play nice with deSolve
-	return(initial_conditions)
 }
 
-get_lc_cutoff <- function(full_samples,epsilon=NULL,gradient=FALSE){
-	# this naive algorithm delineates the limit cycle from transient
-	# it places a nearest neighbor ball around the final sample and starts
-	#   the signal at the earliest observation within that ball 
-	x_var <- ifelse(gradient,"f_x","x")
-	y_var <- ifelse(gradient,"f_y","y")
+calc_lc_error <- function(initial_condition, true_grad, est_grad, t_star, N, losses, plot = FALSE, return_transients = FALSE){
+	# Step 1: Fit estimated trajectory from initial condition
+	time_vec.true <- seq(0,0.05*2*t_star,length.out=N) # TODO: Properly
+	true_grad_augment <- function(t,v,parms){return(true_grad(v))} # play nice with deSolve
+	true_trajectory <- deSolve::lsoda(initial_condition, time_vec.true, true_grad_augment)
+	true_transient.cutoff <- get_lc_cutoff(true_trajectory)
+	true_lc <- true_trajectory[true_transient.cutoff:N,]
+	if(is.null(nrow(true_lc))){
+		true_lc <- matrix(c(true_lc),nrow=1,dimnames=list(NULL,names(true_lc)))
+		true_lc <- cbind(true_lc,source = 1)
+	} else {true_lc <- cbind(true_lc,source = 1)}
+	true_lc_true_grad <- matrix(unlist(apply(true_lc,1,function(row){true_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 	
-	final_observation <- full_samples[nrow(full_samples),c(x_var,y_var)]
-	if(is.null(nrow(final_observation))){final_observation <- matrix(final_observation,ncol=length(final_observation))}
-	other_observations <- full_samples[-nrow(full_samples),c(x_var,y_var)]
-	if(is.null(nrow(other_observations))){other_observations <- matrix(other_observations,ncol=length(other_observations))}
+	time_vec.est <- seq(0,0.05*2*t_star,length.out=N) # solve for too long
+	est_grad_augment <- function(t,v,parms){return(est_grad(v))}
+	estimated_trajectory <- deSolve::lsoda(initial_condition, time_vec.est, est_grad_augment)
+	est_transient.cutoff <- get_lc_cutoff(estimated_trajectory)
+	est_lc <- estimated_trajectory[est_transient.cutoff:N,]
+	if(is.null(nrow(est_lc))){
+		est_lc <- matrix(c(est_lc),nrow=1,dimnames=list(NULL,names(est_lc)))
+		est_lc <- cbind(est_lc,source = 2)
+	} else {est_lc <- cbind(est_lc,source = 2)}
+	est_lc_est_grad <- matrix(unlist(apply(est_lc,1,function(row){est_grad(c(x=row[2],y=row[3]))})),ncol=2,byrow=TRUE)
 	
-	cutoff_index <- min(RANN::nn2(other_observations,final_observation,
-								  k=nrow(other_observations))$nn.idx[1:(nrow(other_observations)/50)])
+	# Step 2: Calculate mean nearest-neighbor distance
+	computed_losses <- c()
+	if ("squared_model" %in% losses){
+		distances <- (RANN::nn2(matrix(est_lc[,c("x","y")],ncol=2),
+								matrix(true_lc[,c("x","y")],ncol=2),
+								k=1)$nn.dists)^2
+		lc_mse <- apply(distances,2,mean)
+		computed_losses <- c(computed_losses, c("squared_model" = lc_mse))
+	}
+	if ("squared_estimator" %in% losses){
+		distances <- (RANN::nn2(matrix(true_lc[,c("x","y")],ncol=2),
+								matrix(est_lc[,c("x","y")],ncol=2),
+								k=1)$nn.dists)^2
+		lc_mse <- apply(distances,2,mean)
+		computed_losses <- c(computed_losses, c("squared_estimator" = lc_mse))
+	}
+
+	# Step 3: Diagnostics
+	if (plot){
+		full_data <- rbind(true_lc,est_lc)
+		transient_plot <- ggplot(as_tibble(full_data), aes(x=x, y=y)) +
+			geom_point(aes(color=factor(source))) +
+			geom_path(aes(color=factor(source))) +
+			geom_point(x = initial_condition[1], y = initial_condition[2] , color = "red", size = 3) + 
+			labs(title="Transient")
+		print(transient_plot)
+	}
 	
-	if (cutoff_index == nrow(full_samples)){warning("No transient cutoff found. This system may be unstable.")}
-	return(cutoff_index)
+	if (return_transients){
+		true_lc <- cbind(true_lc, true_lc_true_grad)
+		est_lc <- cbind(est_lc, est_lc_est_grad)
+		output_list <- list(losses = computed_losses,
+							true_lc = true_lc,
+							est_lc = est_lc
+		)
+		return(output_list)
+	}
+	return(computed_losses)
+}
+
+quantify_lc_closure <- function(data){
+	
+	return(NA)
 }
 
 ################

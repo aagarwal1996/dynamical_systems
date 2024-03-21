@@ -52,30 +52,34 @@ build_scorecard <- function(data_object,initial_conditions,t_star,true_grad,esti
 	 	geom_path(aes(linetype=Estimator,color=IC)) +
 	 	geom_point(data = as_tibble(initial_conditions), aes(x=x, y=y), color = "red", size = 3) + 
 	 	geom_point(data = as_tibble(data_object$smooth), aes(x = x, y = y), color = "#FDB515", alpha = 0.3) +
-	 	labs(title=title_str)
+	 	labs(title=title_str) +
+		facet_wrap(~Estimator)
 	
-	mytheme <- gridExtra::ttheme_default(
-		colhead = list(fg_params=list(cex = 0.5)))
-	output_table <- gridExtra::tableGrob(loss_tibble_wide, theme = mytheme)
-	# Set widths/heights to 'fill whatever space I have'
-	output_table$widths <- unit(rep(1, ncol(output_table)), "null")
-	output_table$heights <- unit(rep(1, nrow(output_table)), "null")
-	
-	# Format table as plot
-	p3 <- ggplot() +
-		annotation_custom(output_table)
-	scorecard_plot <- transient_plot + p3 + plot_layout(ncol = 1)
+	if (FALSE){
+		mytheme <- gridExtra::ttheme_default(
+			colhead = list(fg_params=list(cex = 0.5)))
+		output_table <- gridExtra::tableGrob(loss_tibble_wide, theme = mytheme)
+		# Set widths/heights to 'fill whatever space I have'
+		output_table$widths <- unit(rep(1, ncol(output_table)), "null")
+		output_table$heights <- unit(rep(1, nrow(output_table)), "null")
+		
+		# Format table as plot
+		p3 <- ggplot() +
+			annotation_custom(output_table)
+	}
+	scorecard_plot <- transient_plot #+ p3 + plot_layout(ncol = 1)
 	print(scorecard_plot)
-
 	return(list(tibble = loss_tibble_long, plot = scorecard_plot))
 }
 
-run_replicated_score_card <- function(data_object,true_grad,estimators,losses,ic_counts,ic_radii,ic_noise,N=1000,title_str=""){
+run_replicated_score_card <- function(data_object,true_grad,estimators,losses,ic_counts,ic_radii,ic_noise,N=1000,title_str="",no_lc=FALSE){
 	run_outcome_list <- list()
 	for (i in 1:length(data_object$replicates)){
 		initial_conditions <-  sample_ic(data_object$replicates[[i]]$smooth_tail, ic_counts, ic_radii, ic_noise)
-		t_star <- get_lc_cutoff(data_object$replicates[[i]]$smooth)
-		run_result <- build_scorecard(data_object$replicates[[i]],initial_conditions,t_star,true_grad,estimators,losses, N = N, title_str = title_str)
+		t_star <- ifelse(no_lc,1,get_lc_cutoff(data_object$replicates[[i]]$smooth))
+		run_result <- build_scorecard(data_object$replicates[[i]],initial_conditions,
+									  t_star,true_grad,estimators,losses, N = N, 
+									  title_str = title_str)
 		run_outcome_list <- append(run_outcome_list,run_result$tibble)
 	}
 	loss_tibble_long <- dplyr::bind_rows(loss_tibble_list)

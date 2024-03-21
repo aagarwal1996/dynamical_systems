@@ -212,6 +212,34 @@ bifd_spline_gradient <- function(t,x,params){
   return(list(as.vector(c(dx,dy))))
 }
 
+bifd_spline_jacobian <- function(t,x,params){
+	sfd_x = params$fdx
+	sfd_y = params$fdy
+	
+	# Helper function for `lsoda` which evaluates derivatives of a spline fit
+	dx = eval.bifd(x[1],x[2],sfd_x)
+	dy = eval.bifd(x[1],x[2],sfd_y)
+	
+	dx = eval.bifd(x[1],x[2],sfd_x)
+	dy = eval.bifd(x[1],x[2],sfd_y)
+	return(list(as.vector(c(dx,dy))))
+	
+	#####
+	#x_y_matrix <- outer(basis_list$x0[sample_index,],basis_list$y0[sample_index,])
+	#dx_y_matrix <- outer(basis_list$x1[sample_index,],basis_list$y0[sample_index,])
+	#x_dy_matrix <- outer(basis_list$x0[sample_index,], basis_list$y1[sample_index,])
+	#x_y_vec <- c(x_y_matrix)
+	#dx_y_vec <- c(dx_y_matrix)
+	#x_dy_vec <- c(x_dy_matrix)
+	#x_coefs <- c(init_fdx$coefs)
+	#y_coefs <- c(init_fdy$coefs)
+	
+	# get eigen-stuff from the original Jacobian
+	#jacobian <- matrix(c(x_coefs%*%c(dx_y_matrix),y_coefs%*%c(dx_y_matrix),x_coefs%*%c(x_dy_matrix),y_coefs%*%c(x_dy_matrix)),nrow=2)
+	
+	return(jacobian)
+}
+
 
 ### New work --------------
 # TODO: Integrate side information
